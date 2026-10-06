@@ -1,0 +1,37 @@
+{
+  "name": "vulnforge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VULNFORGE project foundation and landing page for Module 1.",
+  "scripts": {
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend": "npm --prefix backend run build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "test": "npm run build:frontend && npm run build:backend"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PrabhSaran-07/VulnForge.git"
+  },
+  "keywords": [
+    "cybersecurity",
+    "ctf",
+    "education",
+    "web-security"
+  ],
+  "author": "PrabhSaran-07",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/PrabhSaran-07/VulnForge/issues"
+  },
+  "homepage": "https://github.com/PrabhSaran-07/VulnForge#readme",
+  "dependencies": {
+    "@prisma/client": "^7.10.0",
+    "dotenv": "^18.0.5",
+    "prisma": "^7.10.0"
+  }
+}
