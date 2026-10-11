@@ -1,6 +1,226 @@
-import { Fragment, type ReactNode } from 'react';
+﻿import {
+  createContext,
+  type FormEvent,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
-type IconName = 'overview' | 'surface' | 'journey' | 'zones' | 'enter';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+
+type UserRole = 'STUDENT' | 'ADMIN';
+
+type AuthUser = {
+  id: string;
+  username: string;
+  email: string;
+  role: UserRole;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type LoginRequest = {
+  identifier: string;
+  password: string;
+};
+
+type RegisterRequest = {
+  username: string;
+  email: string;
+  password: string;
+};
+
+type AuthContextValue = {
+  user: AuthUser | null;
+  loading: boolean;
+  isAuthenticated: boolean;
+  refreshUser: () => Promise<boolean>;
+  login: (payload: LoginRequest) => Promise<void>;
+  register: (payload: RegisterRequest) => Promise<void>;
+  logout: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+function useAuth() {
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider.');
+  }
+
+  return context;
+}
+
+function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refreshUser = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/me`, {
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        setUser(null);
+        return false;
+      }
+
+      const data = await response.json();
+      setUser(data.user ?? null);
+      return Boolean(data.user);
+    } catch {
+      setUser(null);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const login = async (payload: LoginRequest) => {
+    const response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Unable to log in right now.');
+    }
+
+    setUser(data.user ?? null);
+  };
+
+  const register = async (payload: RegisterRequest) => {
+    const response = await fetch(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Unable to create the account right now.');
+    }
+
+    setUser(data.user ?? null);
+  };
+
+  const logout = async () => {
+    try {
+      await fetch(`${API_BASE}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } finally {
+      setUser(null);
+    }
+  };
+
+  useEffect(() => {
+    void refreshUser();
+  }, []);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      loading,
+      isAuthenticated: Boolean(user),
+      refreshUser,
+      login,
+      register,
+      logout,
+    }),
+    [user, loading],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return <LoadingScreen message="Checking your session..." />;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return <>{children}</>;
+}
+
+function Header() {
+  const { user, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/');
+  };
+
+  return (
+    <header className="site-header">
+      <Link className="brand" to="/" aria-label="VULNFORGE home">
+        <span className="brand-mark" aria-hidden="true" />
+        <span className="brand-name">VULNFORGE</span>
+        <span className="brand-tagline">BUILD. BREAK. DEFEND.</span>
+      </Link>
+
+      <div className="header-actions">
+        {isAuthenticated ? (
+          <>
+            <Link className="header-link" to="/profile">PROFILE</Link>
+            <button type="button" className="header-button" onClick={handleLogout}>LOG OUT</button>
+          </>
+        ) : (
+          <>
+            <Link className="header-link" to="/login">LOGIN</Link>
+            <Link className="header-enter" to="/register">GET STARTED</Link>
+          </>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function SectionCode({ children, tone = 'amber' }: { children: ReactNode; tone?: string }) {
+  return <span className={`section-code tone-${tone}`}>{children}</span>;
+}
+
+function Icon({ name }: { name: 'overview' | 'surface' | 'journey' | 'zones' | 'enter' }) {
+  const paths: Record<string, ReactNode> = {
+    overview: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><path d="M12 2v4m10 6h-4M12 22v-4M2 12h4" /></>,
+    surface: <><rect x="3" y="4" width="6" height="5" rx="1" /><rect x="15" y="15" width="6" height="5" rx="1" /><rect x="15" y="4" width="6" height="5" rx="1" /><path d="M9 6.5h3a3 3 0 0 1 3 3V15m-3-3-3 3 3 3" /></>,
+    journey: <><path d="M4 18h4l3-6 4 3 5-9" /><circle cx="4" cy="18" r="1" /><circle cx="11" cy="12" r="1" /><circle cx="15" cy="15" r="1" /><circle cx="20" cy="6" r="1" /></>,
+    zones: <><path d="M12 3 3.5 8v8L12 21l8.5-5V8L12 3Z" /><path d="m3.5 8 8.5 5 8.5-5M12 13v8m-4-13 8 5" /></>,
+    enter: <><path d="M5 4h14v16H5zM8 8l2 2-2 2m4 0h4m-8 3 2 2-2 2m4 0h4" /></>,
+  };
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      {paths[name]}
+    </svg>
+  );
+}
 
 const zones = [
   {
@@ -52,42 +272,6 @@ const zones = [
     tier: 'ALL LEVELS',
   },
 ];
-
-function Icon({ name }: { name: IconName }) {
-  const paths: Record<IconName, React.ReactNode> = {
-    overview: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><path d="M12 2v4m10 6h-4M12 22v-4M2 12h4" /></>,
-    surface: <><rect x="3" y="4" width="6" height="5" rx="1" /><rect x="15" y="15" width="6" height="5" rx="1" /><rect x="15" y="4" width="6" height="5" rx="1" /><path d="M9 6.5h3a3 3 0 0 1 3 3V15m-3-3-3 3 3 3" /></>,
-    journey: <><path d="M4 18h4l3-6 4 3 5-9" /><circle cx="4" cy="18" r="1" /><circle cx="11" cy="12" r="1" /><circle cx="15" cy="15" r="1" /><circle cx="20" cy="6" r="1" /></>,
-    zones: <><path d="M12 3 3.5 8v8L12 21l8.5-5V8L12 3Z" /><path d="m3.5 8 8.5 5 8.5-5M12 13v8m-4-13 8 5" /></>,
-    enter: <><path d="M5 4h14v16H5zM8 8l2 2-2 2m4 0h4m-8 3 2 2-2 2m4 0h4" /></>,
-  };
-
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      {paths[name]}
-    </svg>
-  );
-}
-
-function Header() {
-  return (
-    <header className="site-header">
-      <a className="brand" href="#hero" aria-label="VULNFORGE home">
-        <span className="brand-mark" aria-hidden="true" />
-        <span className="brand-name">VULNFORGE</span>
-        <span className="brand-tagline">BUILD. BREAK. DEFEND.</span>
-      </a>
-      <div className="header-actions">
-        <span className="header-status">PLATFORM: MODULE 01</span>
-        <a className="header-enter" href="#enter">EXPLORE <span aria-hidden="true">↗</span></a>
-      </div>
-    </header>
-  );
-}
-
-function SectionCode({ children, tone = 'amber' }: { children: ReactNode; tone?: string }) {
-  return <span className={`section-code tone-${tone}`}>{children}</span>;
-}
 
 function Hero() {
   return (
@@ -153,8 +337,8 @@ function Hero() {
         </div>
 
         <div className="hero-actions">
-          <a className="button button-primary" href="#attack-surface">EXPLORE THE SURFACE <span aria-hidden="true">→</span></a>
-          <a className="button button-secondary" href="#journey">EXPLORE THE LEARNING PATH</a>
+          <Link className="button button-primary" to="/register">GET STARTED <span aria-hidden="true">→</span></Link>
+          <Link className="button button-secondary" to="/login">LOGIN TO VULNFORGE</Link>
         </div>
 
         <div className="radar-panel">
@@ -172,93 +356,52 @@ function AttackSurface() {
     { label: 'ENTRY POINT', index: 'EDGE 01', name: 'USER / CLIENT', detail: 'REQUEST: HTTPS', icon: '↗', tone: 'amber' },
     { label: 'IDENTITY & POLICY', index: 'GATEWAY 02', name: 'ACCESS CHECK', detail: 'TRUST BOUNDARY: VERIFY', icon: '◇', tone: 'amber' },
     { label: 'APPLICATION LAYER', index: 'RUNTIME 03', name: 'SERVICE LOGIC', detail: 'INPUT: UNTRUSTED', icon: '!', tone: 'red' },
-    { label: 'DATA LAYER', index: 'STORE 04', name: 'DATA BOUNDARY', detail: 'ACCESS: RESTRICTED', icon: '▤', tone: 'green' },
+    { label: 'DATA LAYER', index: 'STORE 04', name: 'PERSISTENCE', detail: 'ROLE-BASED STATE', icon: '▣', tone: 'amber' },
   ];
 
   return (
     <section className="surface-section section-frame" id="attack-surface">
       <div className="content-column section-stack">
         <div className="section-heading">
-          <SectionCode>[ ATTACK SURFACE ARCHITECTURE ]</SectionCode>
-          <h2>Every system has a surface.</h2>
-          <p>Security issues often emerge where assumptions meet: untrusted input crosses a boundary, identity checks drift from access policy, or data reaches a place it shouldn’t.</p>
+          <SectionCode>[ ATTACK SURFACE ]</SectionCode>
+          <h2>Every system has a boundary worth understanding.</h2>
         </div>
-
-        <div className="architecture-panel">
-          <div className="panel-heading">
-            <span><i className="status-indicator" /> SYSTEM EXECUTION PIPELINE</span>
-            <span className="panel-meta">ILLUSTRATIVE MODEL // 04 NODES</span>
-          </div>
-          <div className="pipeline">
-            {nodes.map((node, index) => (
-              <Fragment key={node.index}>
-                <article className={`pipeline-node node-${node.tone}`}>
-                  <div className="node-label"><span>{node.label}</span><span>{node.index}</span></div>
-                  <div className="node-name"><strong>{node.name}</strong><span aria-hidden="true">{node.icon}</span></div>
-                  <div className="node-detail">{node.detail}</div>
-                  {node.tone === 'red' && <span className="flaw-label">RISK SURFACE</span>}
-                </article>
-                {index < nodes.length - 1 && <span className="pipeline-arrow" aria-hidden="true">→</span>}
-              </Fragment>
-            ))}
-          </div>
-          <div className="boundary-note">
-            <span><span aria-hidden="true">⌑</span> [TRUST BOUNDARY] Every transition needs an explicit security decision.</span>
-            <span className="boundary-state">MODEL: EDUCATIONAL</span>
-          </div>
+        <div className="surface-grid">
+          {nodes.map((node) => (
+            <article className="surface-node" key={node.index}>
+              <div className="node-topline"><span>{node.label}</span><span className={`tone-${node.tone}`}>{node.index}</span></div>
+              <div className="node-icon" aria-hidden="true">{node.icon}</div>
+              <h3>{node.name}</h3>
+              <p>{node.detail}</p>
+            </article>
+          ))}
         </div>
       </div>
     </section>
   );
 }
 
-function DiscoveryVisual() {
-  return (
-    <div className="discovery-visual" role="img" aria-label="Illustration of a circuit board with a highlighted trust boundary">
-      <div className="board-grid" />
-      <svg className="board-traces" viewBox="0 0 900 320" aria-hidden="true">
-        <g fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M0 72h160l42 42h140l37-37h105" />
-          <path d="M0 160h115l44-44h103l35 35h138l40-40h110" />
-          <path d="M900 73H760l-41 41H588l-34 34H426" />
-          <path d="M900 190H764l-50-50H603l-41 41H477" />
-          <path d="M107 0v53l40 40v49m129 178v-69l-35-35m448 104v-61l38-38" />
-        </g>
-        <g fill="currentColor">
-          <circle cx="160" cy="72" r="5" /><circle cx="484" cy="77" r="5" />
-          <circle cx="760" cy="73" r="5" /><circle cx="115" cy="160" r="5" />
-          <circle cx="764" cy="190" r="5" /><circle cx="276" cy="142" r="5" />
-        </g>
-        <g className="board-chip">
-          <rect x="355" y="97" width="190" height="126" rx="5" />
-          <rect x="380" y="119" width="140" height="82" rx="2" />
-          <path d="M401 145h98m-98 28h98" />
-          <path d="M342 116h13m-13 22h13m-13 22h13m-13 22h13m190-64h13m-13 22h13m-13 22h13m-13 22h13" />
-        </g>
-      </svg>
-      <div className="visual-badges">
-        <span>SYSTEM / 07 // SURFACE: ANALYZING</span>
-        <span>REQUEST: OBSERVED</span>
-        <strong>BOUNDARY CHECK: IN PROGRESS</strong>
-      </div>
-      <div className="visual-caption"><span>ARCHITECTURE STUDY: TRUST FLOW</span><span>OBSERVATION: FIRST STEP</span></div>
-    </div>
-  );
-}
-
 function LearningJourney() {
   return (
     <section className="journey-section section-frame" id="journey">
-      <div className="content-column journey-stack">
+      <div className="content-column section-stack">
+        <div className="section-heading">
+          <SectionCode>[ LEARNING JOURNEY ]</SectionCode>
+          <h2>Investigate the assumptions behind the system.</h2>
+        </div>
         <article className="journey-act">
-          <div className="act-meta"><SectionCode>[ 01 // DISCOVERY ]</SectionCode><span>VECTOR: OBSERVATION</span></div>
-          <h2>Curiosity finds the first crack.</h2>
-          <p>Every investigation starts with careful observation: an unexpected response, a confusing permission boundary, or behavior that doesn’t match the system’s rules.</p>
-          <DiscoveryVisual />
+          <div className="act-meta"><SectionCode tone="red">[ 01 // TRUST BOUNDARY ]</SectionCode><span className="tone-red">VERIFY IDENTITY</span></div>
+          <h2>Security starts with who the actor is.</h2>
+          <p>Before a request can be trusted, the service must answer a basic question: who is this user, and what assumptions are being made about identity?</p>
+          <div className="diagnostic-panel">
+            <div className="diagnostic-topline"><span><i className="signal-dot signal-red" />[ STATE: UNVERIFIED ]</span><span>IDENTITY CHECK</span></div>
+            <div className="diagnostic-title"><strong>AUTHENTICATION REQUIRED</strong><span>VERIFY</span></div>
+            <pre><code><span>&gt;</span> session.user = <b>unknown</b>{'\n'}<span>&gt;</span> access.check = <b>pending</b>{'\n'}<i>[!] AUTHENTICATION: REQUIRED BEFORE ACTIONS</i></code></pre>
+          </div>
         </article>
 
         <article className="journey-act">
-          <div className="act-meta"><SectionCode tone="red">[ 02 // VULNERABILITY ]</SectionCode><span className="tone-red">INVARIANT: UNDER REVIEW</span></div>
+          <div className="act-meta"><SectionCode>[ 02 // VULNERABILITY ]</SectionCode><span className="tone-red">INVARIANT: UNDER REVIEW</span></div>
           <h2>Then the system tells you where it hurts.</h2>
           <p>A security assumption fails. Instead of blind guessing, learners trace what happened and identify the underlying weakness in a controlled, educational context.</p>
           <div className="diagnostic-panel">
@@ -287,7 +430,7 @@ function LearningJourney() {
           <div className="remediation-panel">
             <div className="remediation-topline"><span>[ UNDERSTOOD → REMEDIATED → VERIFIED ]</span><span>DEFENSIVE EXAMPLE</span></div>
             <div className="remediation-title"><strong>EXPLICIT BOUNDARY ENFORCEMENT</strong><span>REVIEWABLE</span></div>
-            <pre><code><i>// Validate identity and policy before data access</i>{'\n'}if (!policy.allows(subject, resource)) {'{'}{'\n'}  return deny("access_not_permitted");{'\n'}{'}'}{'\n'}return read(resource);</code></pre>
+            <pre><code><i>// Validate identity and policy before data access</i>{'\n'}if (!policy.allows(subject, resource)) {'{'}{'\n'}  return deny("access_not_permitted");{'\n'}{' }'}{'\n'}return read(resource);</code></pre>
             <div className="remediation-foot"><span>CONTROL: SERVER-SIDE AUTHORIZATION</span><span>OUTCOME: ACCESS DENIED BY DEFAULT</span></div>
           </div>
         </article>
@@ -337,7 +480,7 @@ function Closing() {
           <SectionCode>[ START WITH THE FOUNDATIONS ]</SectionCode>
           <h2>There’s always more to discover.</h2>
           <p className="enter-tagline">Build the skill. Break down the problem. Defend the system.</p>
-          <a className="button button-primary" href="#attack-surface">EXPLORE VULNFORGE <span aria-hidden="true">→</span></a>
+          <Link className="button button-primary" to="/register">EXPLORE VULNFORGE <span aria-hidden="true">→</span></Link>
           <div className="ethics-note">
             <div className="ethics-meta"><span>STATUS: PUBLIC LEARNING EXPERIENCE</span><span>SECURITY: BUILT FOR SAFE LEARNING</span></div>
             <p>VULNFORGE is a learning platform in development. Practical labs and isolated challenge environments are planned for future modules; this landing page does not provide exploit targets.</p>
@@ -350,7 +493,7 @@ function Closing() {
 }
 
 function BottomNavigation() {
-  const items: { label: string; href: string; icon: IconName }[] = [
+  const items: { label: string; href: string; icon: 'overview' | 'surface' | 'journey' | 'zones' | 'enter' }[] = [
     { label: 'Overview', href: '#hero', icon: 'overview' },
     { label: 'Surface', href: '#attack-surface', icon: 'surface' },
     { label: 'Journey', href: '#journey', icon: 'journey' },
@@ -370,7 +513,7 @@ function BottomNavigation() {
   );
 }
 
-export default function App() {
+function LandingPage() {
   return (
     <div className="page-shell">
       <Header />
@@ -383,5 +526,210 @@ export default function App() {
       </main>
       <BottomNavigation />
     </div>
+  );
+}
+
+function LoadingScreen({ message }: { message: string }) {
+  return (
+    <div className="auth-shell">
+      <div className="auth-card auth-loading">
+        <div className="spinner" aria-hidden="true" />
+        <p>{message}</p>
+      </div>
+    </div>
+  );
+}
+
+function AuthPage({ mode }: { mode: 'login' | 'register' }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = ((location.state as { from?: string } | null)?.from as string | undefined) || '/profile';
+  const { login, register, isAuthenticated } = useAuth();
+
+  const isLogin = mode === 'login';
+  const [form, setForm] = useState({
+    username: '',
+    email: '',
+    identifier: '',
+    password: '',
+    confirmPassword: '',
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+
+  useEffect(() => {
+    if (isAuthenticated && !isSubmitting) {
+      navigate(from, { replace: true });
+    }
+  }, [from, isAuthenticated, isSubmitting, navigate]);
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitError('');
+
+    if (isLogin) {
+      if (!form.identifier || !form.password) {
+        setSubmitError('Please enter your email or username and password.');
+        return;
+      }
+
+      try {
+        setIsSubmitting(true);
+        await login({ identifier: form.identifier, password: form.password });
+        navigate(from, { replace: true });
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : 'Unable to log in right now.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    if (!form.username || !form.email || !form.password) {
+      setSubmitError('Please complete all fields to create your account.');
+      return;
+    }
+
+    if (form.password !== form.confirmPassword) {
+      setSubmitError('Passwords do not match.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await register({ username: form.username, email: form.email, password: form.password });
+      navigate('/profile', { replace: true });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to create the account right now.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-header">
+          <SectionCode>[ {isLogin ? 'LOGIN' : 'REGISTER'} ]</SectionCode>
+          <h1>{isLogin ? 'Welcome back to VULNFORGE' : 'Create your VULNFORGE account'}</h1>
+        </div>
+
+        <form className="auth-form" onSubmit={handleSubmit} noValidate>
+          {!isLogin && (
+            <label>
+              <span>Username</span>
+              <input type="text" name="username" value={form.username} onChange={handleChange} placeholder="security_student" autoComplete="username" />
+            </label>
+          )}
+
+          {isLogin ? (
+            <label>
+              <span>Email or username</span>
+              <input type="text" name="identifier" value={form.identifier} onChange={handleChange} placeholder="student@example.com or alice" autoComplete="username" />
+            </label>
+          ) : (
+            <label>
+              <span>Email</span>
+              <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="student@example.com" autoComplete="email" />
+            </label>
+          )}
+
+          <label>
+            <span>Password</span>
+            <input type="password" name="password" value={form.password} onChange={handleChange} placeholder="••••••••" autoComplete={isLogin ? 'current-password' : 'new-password'} />
+          </label>
+
+          {!isLogin && (
+            <label>
+              <span>Confirm password</span>
+              <input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Repeat your password" autoComplete="new-password" />
+            </label>
+          )}
+
+          {submitError && <div className="form-error">{submitError}</div>}
+
+          <button type="submit" className="button button-primary auth-submit" disabled={isSubmitting}>
+            {isSubmitting ? (isLogin ? 'Signing in...' : 'Creating account...') : isLogin ? 'Log in' : 'Create account'}
+          </button>
+        </form>
+
+        <div className="auth-footer">
+          <span>{isLogin ? 'Need an account?' : 'Already have an account?'}</span>
+          <Link to={isLogin ? '/register' : '/login'}>{isLogin ? 'Register' : 'Log in'}</Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfilePage() {
+  const { user, logout, loading } = useAuth();
+  const navigate = useNavigate();
+
+  if (loading) {
+    return <LoadingScreen message="Loading your profile..." />;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/');
+  };
+
+  return (
+    <div className="auth-shell profile-shell">
+      <div className="auth-card profile-card">
+        <div className="auth-header">
+          <SectionCode>[ PROFILE ]</SectionCode>
+          <h1>Your account</h1>
+        </div>
+
+        <div className="profile-grid">
+          <div>
+            <label>Username</label>
+            <p>{user.username}</p>
+          </div>
+          <div>
+            <label>Email</label>
+            <p>{user.email}</p>
+          </div>
+          <div>
+            <label>Role</label>
+            <p>{user.role}</p>
+          </div>
+          <div>
+            <label>Member since</label>
+            <p>{new Date(user.createdAt).toLocaleDateString()}</p>
+          </div>
+        </div>
+
+        <div className="profile-actions">
+          <Link className="button button-secondary" to="/">Back home</Link>
+          <button type="button" className="button button-primary" onClick={handleLogout}>Log out</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<AuthPage mode="login" />} />
+        <Route path="/register" element={<AuthPage mode="register" />} />
+        <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AuthProvider>
   );
 }

@@ -8,6 +8,9 @@
     "dev:backend": "npm --prefix backend run dev",
     "build:frontend": "npm --prefix frontend run build",
     "build:backend": "npm --prefix backend run build",
+    "db:generate": "npx prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "npx prisma migrate dev --schema prisma/schema.prisma",
+    "db:status": "npx prisma migrate status --schema prisma/schema.prisma",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
     "test": "npm run build:frontend && npm run build:backend"
