@@ -4,7 +4,7 @@
 
 VULNFORGE is an educational cybersecurity platform in development. Its goal is to help learners understand common web security weaknesses by eventually letting them investigate controlled challenges, submit flags, track progress, and study remediation guidance.
 
-The current repository provides the landing page and an authentication foundation. Challenge environments, flag submission, scoring, and the other learning-platform features described in the roadmap are not implemented yet.
+The current repository provides the landing page, authentication, and a protected student dashboard/navigation MVP. Challenge environments, flag submission, scoring, and dynamic progress features described in the roadmap are not implemented yet.
 
 ## Contents
 
@@ -27,9 +27,12 @@ The current repository provides the landing page and an authentication foundatio
 ### Implemented
 
 - Responsive React landing page with VULNFORGE branding and product messaging.
-- Login, registration, and profile pages.
+- Login and registration pages, plus a profile view in the authenticated workspace.
 - PostgreSQL-backed user records managed with Prisma.
-- Module 2 authentication: validated student registration, email-or-username login, current-user restoration, logout, and a protected profile page.
+- Module 2 authentication: validated student registration, email-or-username login, current-user restoration, logout, and protected routes.
+- Module 3 dashboard MVP: protected `/dashboard`, responsive desktop/mobile navigation, authenticated username welcome, account/profile navigation, and working logout.
+- Dashboard navigation entry points for Challenges, Categories, and My Progress; unavailable features are explicitly labeled rather than represented with invented data.
+- Shared frontend API request helper that includes credentials and provides consistent HTTP error messages, including 401 and 403.
 - Student and administrator roles, authenticated-session middleware, and role-check middleware.
 - PostgreSQL-backed sessions with an eight-hour cookie lifetime and periodic expired-session cleanup.
 - A backend health endpoint at `GET /api/health`.
@@ -40,7 +43,7 @@ Authentication uses server-managed sessions. Passwords are hashed with bcryptjs 
 
 ### Not implemented yet
 
-The repository does not yet provide working challenge/lab environments, flag submissions, scoring, progress tracking, leaderboards, learning pathways, remediation content, or challenge-administration UI. These remain product goals, not current features. Landing-page sections and messaging about future capabilities do not mean those capabilities are implemented.
+The repository does not yet provide working challenge/lab environments, flag submissions, scoring, dynamic progress tracking, leaderboards, learning pathways, remediation content, or challenge-administration UI. Dashboard summary values are labeled unavailable until backed by real data. These remain product goals, not current features. Landing-page sections and messaging about future capabilities do not mean those capabilities are implemented.
 
 ## Technology stack
 
@@ -75,7 +78,7 @@ Versions below are the versions/ranges declared in the package manifests and loc
 ├── docker/               # Reserved
 ├── docs/                 # Reserved
 ├── frontend/
-│   ├── src/              # React app, routes, and styles
+│   ├── src/              # React app, protected routes, shared API client, and styles
 │   ├── public/
 │   ├── Dockerfile
 │   └── package.json
@@ -245,6 +248,8 @@ Run commands from the repository root unless a command uses `npm --prefix`.
 
 There is no separate frontend unit-test script or standalone type-check script; the frontend build runs `tsc`. The backend auth tests use Node's built-in test runner through `tsx --test`.
 
+The frontend build checks TypeScript and compiles the dashboard; no frontend unit-test or browser-test runner is configured. For manual verification, sign in at `/login`, confirm `/dashboard` shows the signed-in username, refresh to check session restoration, visit Profile/Challenges/Categories/My Progress, then log out. Repeat at a narrow viewport to inspect the horizontally scrollable mobile navigation. Browser verification is not claimed by the automated build.
+
 The authentication suite checks registration, input validation, duplicate and concurrent duplicate registration, password hashing, email/username login, session-ID rotation, `/me`, logout invalidation, cookie attributes, role authorization, sensitive-field exclusion, rate limiting, and PostgreSQL session persistence/expiry across separate store instances. Automated HTTP tests use Express's in-memory session store; the PostgreSQL store behavior is tested directly. The full suite does not simulate restarting the backend process. Frontend authentication flows have been manually exercised in a browser with mocked API responses; there is no frontend unit-test suite, and rapid duplicate-submit prevention has not been conclusively browser-verified.
 
 ## Troubleshooting
@@ -268,6 +273,7 @@ Any intentionally vulnerable educational labs must be isolated from the main pla
 
 - **Completed Module 1 foundation:** React landing page and PostgreSQL/Prisma setup with the initial User/Role migration.
 - **Implemented Module 2 — Authentication & User Management (final operational verification pending):** Student registration; email-or-username login; session restoration and logout; protected profile; student/admin authorization; development admin provisioner; authentication and PostgreSQL session-store tests. Automated auth tests and both application builds pass. Full backend-process-restart persistence and browser verification of rapid duplicate-submit prevention remain outstanding; see [Scripts and tests](#scripts-and-tests).
+- **Implemented Module 3 MVP — Student Dashboard & Navigation:** Protected dashboard and shared workspace layout; session restoration through `/api/auth/me`; responsive desktop/mobile navigation; account/profile and logout; challenges, categories, and progress placeholder pages; shared credentialed API helper with 401/403 error messages. Statistics remain unavailable until real challenge/progress data exists. Frontend build and diff checks have passed; browser verification remains a manual check.
 - **In progress:** No additional module is identified as in progress in the current repository.
 - **Planned:** Controlled vulnerability challenges/labs, flag submission, scoring and progress tracking, learning pathways, remediation guidance, leaderboards/analytics, and challenge administration.
 

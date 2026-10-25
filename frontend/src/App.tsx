@@ -9,8 +9,7 @@
   useState,
 } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+import { ApiError, apiRequest } from './api';
 
 type UserRole = 'STUDENT' | 'ADMIN';
 
@@ -66,45 +65,21 @@ function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setAuthError(null);
 
-    let response: Response;
     try {
-      response = await fetch(`${API_BASE}/api/auth/me`, {
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-    } catch {
-      setUser(null);
-      setAuthError('Unable to connect to VULNFORGE to verify your session.');
-      setLoading(false);
-      return false;
-    }
-
-    if (response.status === 401) {
-      setUser(null);
-      setLoading(false);
-      return false;
-    }
-
-    if (!response.ok) {
-      setUser(null);
-      setAuthError(`Unable to verify your session (server returned ${response.status}).`);
-      setLoading(false);
-      return false;
-    }
-
-    try {
-      const data: { user?: AuthUser } = await response.json();
-      if (!data.user) {
+      const data = await apiRequest<{ user?: AuthUser }>('/api/auth/me');
+      if (!data || !data.user) {
         throw new Error('The session response did not include a user.');
       }
 
       setUser(data.user);
       return true;
-    } catch {
+    } catch (error) {
       setUser(null);
-      setAuthError('Unable to read the session response from the server.');
+      if (error instanceof ApiError && error.status === 401) {
+        return false;
+      }
+
+      setAuthError(error instanceof Error ? error.message : 'Unable to verify your session.');
       return false;
     } finally {
       setLoading(false);
@@ -112,25 +87,13 @@ function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (payload: LoginRequest) => {
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE}/api/auth/login`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      throw new Error('Unable to connect to VULNFORGE. Check your connection and try again.');
-    }
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(data.message || 'Unable to log in right now.');
-    }
+    await apiRequest('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
 
     if (!(await refreshUser())) {
       throw new Error('Login succeeded, but the server session could not be verified. Please try again.');
@@ -138,41 +101,25 @@ function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const register = async (payload: RegisterRequest) => {
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE}/api/auth/register`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      throw new Error('Unable to connect to VULNFORGE. Check your connection and try again.');
-    }
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(data.message || 'Unable to create the account right now.');
-    }
+    await apiRequest('/api/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
   };
 
   const logout = async () => {
-    let response: Response;
     try {
-      response = await fetch(`${API_BASE}/api/auth/logout`, {
+      await apiRequest('/api/auth/logout', {
         method: 'POST',
-        credentials: 'include',
       });
-    } catch {
-      throw new Error('Unable to contact the server to confirm logout. Your session may still be active.');
-    }
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.message || `The server could not confirm logout (HTTP ${response.status}).`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === null) {
+        throw new Error('Unable to contact the server to confirm logout. Your session may still be active.');
+      }
+      throw error;
     }
 
     setUser(null);
@@ -262,7 +209,7 @@ function Header() {
       <div className="header-actions">
         {isAuthenticated ? (
           <>
-            <Link className="header-link" to="/profile">PROFILE</Link>
+            <Link className="header-link" to="/dashboard">DASHBOARD</Link>
             <button type="button" className="header-button" onClick={handleLogout} disabled={isLoggingOut}>
               {isLoggingOut ? 'LOGGING OUT...' : 'LOG OUT'}
             </button>
@@ -621,7 +568,7 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = location.state as { from?: string; notice?: string } | null;
-  const from = locationState?.from || '/profile';
+  const from = locationState?.from || '/dashboard';
   const { login, register, isAuthenticated, authError, refreshUser } = useAuth();
 
   const isLogin = mode === 'login';
@@ -794,19 +741,20 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   );
 }
 
-function ProfilePage() {
-  const { user, logout, loading } = useAuth();
+const workspaceLinks = [
+  { path: '/dashboard', label: 'Dashboard', short: 'DB' },
+  { path: '/challenges', label: 'Challenges', short: 'CH' },
+  { path: '/categories', label: 'Categories', short: 'CA' },
+  { path: '/progress', label: 'My Progress', short: 'PR' },
+  { path: '/profile', label: 'Profile', short: 'AC' },
+];
+
+function WorkspaceLayout({ children }: { children: ReactNode }) {
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-
-  if (loading) {
-    return <LoadingScreen message="Loading your profile..." />;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
+  const location = useLocation();
 
   const handleLogout = async () => {
     if (isLoggingOut) {
@@ -817,7 +765,7 @@ function ProfilePage() {
     setIsLoggingOut(true);
     try {
       await logout();
-      navigate('/');
+      navigate('/login', { replace: true });
     } catch (error) {
       setLogoutError(error instanceof Error ? error.message : 'Unable to confirm logout.');
     } finally {
@@ -826,8 +774,150 @@ function ProfilePage() {
   };
 
   return (
-    <div className="auth-shell profile-shell">
-      <div className="auth-card profile-card">
+    <div className="workspace-shell">
+      <aside className="workspace-sidebar" aria-label="Student navigation">
+        <Link className="workspace-brand" to="/dashboard">
+          <span className="brand-mark" aria-hidden="true" />
+          <span>VULNFORGE</span>
+        </Link>
+        <span className="workspace-nav-heading">LEARNING SPACE</span>
+        <nav className="workspace-nav">
+          {workspaceLinks.map((item) => (
+            <Link
+              key={item.path}
+              className={`workspace-nav-link${location.pathname === item.path ? ' active' : ''}`}
+              to={item.path}
+              aria-current={location.pathname === item.path ? 'page' : undefined}
+            >
+              <span className="workspace-nav-icon" aria-hidden="true">{item.short}</span>
+              <span>{item.label}</span>
+            </Link>
+          ))}
+        </nav>
+        <div className="workspace-sidebar-note">
+          <span className="signal-dot" />
+          <span>CONTROLLED LEARNING ENVIRONMENT</span>
+        </div>
+      </aside>
+
+      <div className="workspace-main">
+        <header className="workspace-topbar">
+          <div>
+            <span className="workspace-eyebrow">VULNFORGE / STUDENT PORTAL</span>
+            <p className="workspace-current-user">{user?.username}</p>
+          </div>
+          <div className="workspace-account">
+            <Link className="workspace-account-link" to="/profile" aria-label="View account profile">
+              <span className="workspace-avatar" aria-hidden="true">{user?.username.slice(0, 1).toUpperCase()}</span>
+              <span>{user?.username}</span>
+            </Link>
+            <button type="button" className="header-button" onClick={handleLogout} disabled={isLoggingOut}>
+              {isLoggingOut ? 'LOGGING OUT...' : 'LOG OUT'}
+            </button>
+          </div>
+        </header>
+        {logoutError && <p className="workspace-logout-error form-error" role="alert">{logoutError}</p>}
+        <main className="workspace-content">{children}</main>
+      </div>
+
+      <nav className="workspace-mobile-nav" aria-label="Student navigation">
+        {workspaceLinks.map((item) => (
+          <Link
+            key={item.path}
+            className={`workspace-mobile-link${location.pathname === item.path ? ' active' : ''}`}
+            to={item.path}
+            aria-current={location.pathname === item.path ? 'page' : undefined}
+          >
+            <span aria-hidden="true">{item.short}</span>
+            <small>{item.label}</small>
+          </Link>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+function DashboardPage() {
+  const { user } = useAuth();
+
+  return (
+    <>
+      <section className="workspace-welcome">
+        <SectionCode>[ STUDENT DASHBOARD ]</SectionCode>
+        <h1>Welcome, {user?.username}</h1>
+        <p>Your learning workspace is ready. Explore planned learning areas below; activity and progress tracking are not available yet.</p>
+        <div className="workspace-quick-links">
+          <Link className="button button-primary" to="/challenges">EXPLORE CHALLENGES <span aria-hidden="true">→</span></Link>
+          <Link className="button button-secondary" to="/categories">BROWSE CATEGORIES</Link>
+        </div>
+      </section>
+
+      <section className="workspace-stats" aria-label="Learning summary">
+        {[
+          ['POINTS', 'Not available', 'Points are not tracked yet'],
+          ['CHALLENGES SOLVED', 'Not available', 'Challenge solving is planned for Module 4'],
+          ['CHALLENGES ATTEMPTED', 'Not available', 'Challenge attempts are planned for Module 4'],
+          ['OVERALL PROGRESS', 'Not available', 'Progress tracking planned'],
+        ].map(([label, value, note]) => (
+          <article className="workspace-stat-card" key={label}>
+            <span className="workspace-stat-label">{label}</span>
+            <strong>{value}</strong>
+            <p>{note}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="workspace-panel workspace-next">
+        <div>
+          <SectionCode>[ NEXT STEP ]</SectionCode>
+          <h2>Explore the learning areas</h2>
+          <p>Explore planned challenges and security learning categories. Challenge solving and progress tracking are not available yet.</p>
+        </div>
+        <div className="workspace-next-links">
+          <Link className="workspace-text-link" to="/challenges">VIEW CHALLENGES <span aria-hidden="true">→</span></Link>
+          <Link className="workspace-text-link" to="/categories">VIEW CATEGORIES <span aria-hidden="true">→</span></Link>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function WorkspacePlaceholder({ section }: { section: 'Challenges' | 'Categories' | 'My Progress' }) {
+  const copy = {
+    Challenges: {
+      code: 'CHALLENGE CATALOGUE',
+      description: 'Challenge browsing, attempts, and submissions are planned for a later module. No challenges are available to launch yet.',
+    },
+    Categories: {
+      code: 'LEARNING CATEGORIES',
+      description: 'Security learning categories are planned. Category content will appear here when the catalogue is implemented.',
+    },
+    'My Progress': {
+      code: 'LEARNING PROGRESS',
+      description: 'Progress summaries will be based on real challenge activity. Tracking is not available yet, so no statistics are shown.',
+    },
+  }[section];
+
+  return (
+    <section className="workspace-placeholder">
+      <SectionCode>[ {copy.code} ]</SectionCode>
+      <h1>{section}</h1>
+      <p>{copy.description}</p>
+      <span className="workspace-planned-badge"><span className="signal-dot" /> PLANNED — NOT AVAILABLE YET</span>
+      <Link className="workspace-text-link" to="/dashboard">← BACK TO DASHBOARD</Link>
+    </section>
+  );
+}
+
+function ProfilePage() {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <LoadingScreen message="Loading your profile..." />;
+  }
+
+  return (
+    <section className="workspace-profile">
         <div className="auth-header">
           <SectionCode>[ PROFILE ]</SectionCode>
           <h1>Your account</h1>
@@ -853,15 +943,34 @@ function ProfilePage() {
         </div>
 
         <div className="profile-actions">
-          <Link className="button button-secondary" to="/">Back home</Link>
-          <button type="button" className="button button-primary" onClick={handleLogout} disabled={isLoggingOut}>
-            {isLoggingOut ? 'Logging out...' : 'Log out'}
-          </button>
+          <Link className="button button-secondary" to="/dashboard">Back to dashboard</Link>
         </div>
-        {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
-      </div>
-    </div>
+      </section>
   );
+}
+
+function WorkspacePage() {
+  const location = useLocation();
+  let content: ReactNode;
+
+  switch (location.pathname) {
+    case '/dashboard':
+      content = <DashboardPage />;
+      break;
+    case '/challenges':
+      content = <WorkspacePlaceholder section="Challenges" />;
+      break;
+    case '/categories':
+      content = <WorkspacePlaceholder section="Categories" />;
+      break;
+    case '/progress':
+      content = <WorkspacePlaceholder section="My Progress" />;
+      break;
+    default:
+      content = <ProfilePage />;
+  }
+
+  return <WorkspaceLayout>{content}</WorkspaceLayout>;
 }
 
 export default function App() {
@@ -871,7 +980,11 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
-        <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/dashboard" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/challenges" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/categories" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/progress" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AuthProvider>
