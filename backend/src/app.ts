@@ -1,12 +1,20 @@
-﻿import cors from 'cors';
+import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import session from 'express-session';
 import helmet from 'helmet';
+import pg from 'pg';
+import connectPgSimple from 'connect-pg-simple';
 import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
 import { env } from './config/env.js';
 
 const app = express();
+const sessionCookie = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: env.NODE_ENV === 'production',
+  maxAge: 1000 * 60 * 60 * 8,
+};
 
 app.use(
   cors({
@@ -15,18 +23,37 @@ app.use(
   }),
 );
 
+// Build the session store. Use PostgreSQL in development/production so sessions
+// survive backend restarts. Use the built-in in-memory store during automated
+// testing to avoid requiring a live database just to run unit tests.
+function buildSessionStore(): session.Store | undefined {
+  if (env.NODE_ENV === 'test') {
+    // Let express-session use its default MemoryStore for tests.
+    return undefined;
+  }
+
+  const PgSession = connectPgSimple(session);
+  const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
+  return new PgSession({
+    pool,
+    tableName: 'session',
+    // Automatically create the session table if it does not exist.
+    createTableIfMissing: true,
+    // Clear expired sessions every hour.
+    pruneSessionInterval: 60 * 60,
+  });
+}
+
+const sessionStore = buildSessionStore();
+
 app.use(
   session({
     name: 'vulnforge.sid',
     secret: env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
-      maxAge: 1000 * 60 * 60 * 8,
-    },
+    store: sessionStore,
+    cookie: sessionCookie,
   }),
 );
 
@@ -35,7 +62,7 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        connectSrc: ["'self'", 'http://localhost:5173'],
+        connectSrc: ["'self'", env.CORS_ORIGIN],
         imgSrc: ["'self'", 'data:'],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],

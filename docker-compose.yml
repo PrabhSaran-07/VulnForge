@@ -23,6 +23,7 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://vulnforge:vulnforge_password@postgres:5432/vulnforge?schema=public
       CORS_ORIGIN: http://localhost:5173
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in the project-root .env file}
     ports:
       - '4000:4000'
     volumes:

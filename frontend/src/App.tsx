@@ -5,6 +5,7 @@
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -36,6 +37,7 @@ type RegisterRequest = {
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
+  authError: string | null;
   isAuthenticated: boolean;
   refreshUser: () => Promise<boolean>;
   login: (payload: LoginRequest) => Promise<void>;
@@ -58,26 +60,51 @@ function useAuth() {
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const refreshUser = async () => {
+    setLoading(true);
+    setAuthError(null);
+
+    let response: Response;
     try {
-      const response = await fetch(`${API_BASE}/api/auth/me`, {
+      response = await fetch(`${API_BASE}/api/auth/me`, {
         credentials: 'include',
         headers: {
           Accept: 'application/json',
         },
       });
-
-      if (!response.ok) {
-        setUser(null);
-        return false;
-      }
-
-      const data = await response.json();
-      setUser(data.user ?? null);
-      return Boolean(data.user);
     } catch {
       setUser(null);
+      setAuthError('Unable to connect to VULNFORGE to verify your session.');
+      setLoading(false);
+      return false;
+    }
+
+    if (response.status === 401) {
+      setUser(null);
+      setLoading(false);
+      return false;
+    }
+
+    if (!response.ok) {
+      setUser(null);
+      setAuthError(`Unable to verify your session (server returned ${response.status}).`);
+      setLoading(false);
+      return false;
+    }
+
+    try {
+      const data: { user?: AuthUser } = await response.json();
+      if (!data.user) {
+        throw new Error('The session response did not include a user.');
+      }
+
+      setUser(data.user);
+      return true;
+    } catch {
+      setUser(null);
+      setAuthError('Unable to read the session response from the server.');
       return false;
     } finally {
       setLoading(false);
@@ -85,14 +112,19 @@ function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (payload: LoginRequest) => {
-    const response = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      throw new Error('Unable to connect to VULNFORGE. Check your connection and try again.');
+    }
 
     const data = await response.json().catch(() => ({}));
 
@@ -100,37 +132,51 @@ function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(data.message || 'Unable to log in right now.');
     }
 
-    setUser(data.user ?? null);
+    if (!(await refreshUser())) {
+      throw new Error('Login succeeded, but the server session could not be verified. Please try again.');
+    }
   };
 
   const register = async (payload: RegisterRequest) => {
-    const response = await fetch(`${API_BASE}/api/auth/register`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      throw new Error('Unable to connect to VULNFORGE. Check your connection and try again.');
+    }
 
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       throw new Error(data.message || 'Unable to create the account right now.');
     }
-
-    setUser(data.user ?? null);
   };
 
   const logout = async () => {
+    let response: Response;
     try {
-      await fetch(`${API_BASE}/api/auth/logout`, {
+      response = await fetch(`${API_BASE}/api/auth/logout`, {
         method: 'POST',
         credentials: 'include',
       });
-    } finally {
-      setUser(null);
+    } catch {
+      throw new Error('Unable to contact the server to confirm logout. Your session may still be active.');
     }
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || `The server could not confirm logout (HTTP ${response.status}).`);
+    }
+
+    setUser(null);
+    setAuthError(null);
   };
 
   useEffect(() => {
@@ -141,24 +187,38 @@ function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       loading,
+      authError,
       isAuthenticated: Boolean(user),
       refreshUser,
       login,
       register,
       logout,
     }),
-    [user, loading],
+    [user, loading, authError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, authError, refreshUser } = useAuth();
   const location = useLocation();
 
   if (loading) {
     return <LoadingScreen message="Checking your session..." />;
+  }
+
+  if (authError) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card" role="alert">
+          <p className="form-error">{authError}</p>
+          <button type="button" className="button button-primary auth-submit" onClick={() => void refreshUser()}>
+            Retry session check
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!user) {
@@ -171,10 +231,24 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 function Header() {
   const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
+  const [logoutError, setLogoutError] = useState('');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/');
+    if (isLoggingOut) {
+      return;
+    }
+
+    setLogoutError('');
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/');
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'Unable to confirm logout.');
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   return (
@@ -189,7 +263,9 @@ function Header() {
         {isAuthenticated ? (
           <>
             <Link className="header-link" to="/profile">PROFILE</Link>
-            <button type="button" className="header-button" onClick={handleLogout}>LOG OUT</button>
+            <button type="button" className="header-button" onClick={handleLogout} disabled={isLoggingOut}>
+              {isLoggingOut ? 'LOGGING OUT...' : 'LOG OUT'}
+            </button>
           </>
         ) : (
           <>
@@ -197,6 +273,7 @@ function Header() {
             <Link className="header-enter" to="/register">GET STARTED</Link>
           </>
         )}
+        {logoutError && <span className="header-status" role="alert">{logoutError}</span>}
       </div>
     </header>
   );
@@ -543,8 +620,9 @@ function LoadingScreen({ message }: { message: string }) {
 function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const from = ((location.state as { from?: string } | null)?.from as string | undefined) || '/profile';
-  const { login, register, isAuthenticated } = useAuth();
+  const locationState = location.state as { from?: string; notice?: string } | null;
+  const from = locationState?.from || '/profile';
+  const { login, register, isAuthenticated, authError, refreshUser } = useAuth();
 
   const isLogin = mode === 'login';
   const [form, setForm] = useState({
@@ -556,6 +634,7 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (isAuthenticated && !isSubmitting) {
@@ -570,28 +649,63 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submittingRef.current) {
+      return;
+    }
     setSubmitError('');
 
     if (isLogin) {
-      if (!form.identifier || !form.password) {
+      if (!form.identifier.trim() || !form.password) {
         setSubmitError('Please enter your email or username and password.');
+        return;
+      }
+      if (form.identifier.trim().length > 120) {
+        setSubmitError('Email or username must be 120 characters or fewer.');
+        return;
+      }
+      if (form.password.length < 8 || form.password.length > 128) {
+        setSubmitError('Password must be between 8 and 128 characters.');
         return;
       }
 
       try {
+        submittingRef.current = true;
         setIsSubmitting(true);
         await login({ identifier: form.identifier, password: form.password });
         navigate(from, { replace: true });
       } catch (error) {
         setSubmitError(error instanceof Error ? error.message : 'Unable to log in right now.');
       } finally {
+        submittingRef.current = false;
         setIsSubmitting(false);
       }
       return;
     }
 
-    if (!form.username || !form.email || !form.password) {
+    const username = form.username.trim();
+    const email = form.email.trim();
+    if (!username || !email || !form.password) {
       setSubmitError('Please complete all fields to create your account.');
+      return;
+    }
+
+    if (username.length < 3 || username.length > 50) {
+      setSubmitError('Username must be between 3 and 50 characters.');
+      return;
+    }
+
+    if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setSubmitError('Please enter a valid email address (up to 255 characters).');
+      return;
+    }
+
+    if (
+      form.password.length < 8
+      || form.password.length > 128
+      || !/[A-Za-z]/.test(form.password)
+      || !/\d/.test(form.password)
+    ) {
+      setSubmitError('Password must be 8-128 characters and include at least one letter and one number.');
       return;
     }
 
@@ -601,12 +715,17 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
     }
 
     try {
+      submittingRef.current = true;
       setIsSubmitting(true);
       await register({ username: form.username, email: form.email, password: form.password });
-      navigate('/profile', { replace: true });
+      navigate('/login', {
+        replace: true,
+        state: { notice: 'Account created successfully. Please log in.' },
+      });
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Unable to create the account right now.');
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -619,11 +738,19 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           <h1>{isLogin ? 'Welcome back to VULNFORGE' : 'Create your VULNFORGE account'}</h1>
         </div>
 
+        {isLogin && locationState?.notice && <p role="status">{locationState.notice}</p>}
+        {authError && (
+          <div className="form-error" role="alert">
+            {authError}{' '}
+            <button type="button" onClick={() => void refreshUser()}>Retry session check</button>
+          </div>
+        )}
+
         <form className="auth-form" onSubmit={handleSubmit} noValidate>
           {!isLogin && (
             <label>
               <span>Username</span>
-              <input type="text" name="username" value={form.username} onChange={handleChange} placeholder="security_student" autoComplete="username" />
+              <input type="text" name="username" value={form.username} onChange={handleChange} placeholder="security_student" autoComplete="username" maxLength={50} />
             </label>
           )}
 
@@ -635,23 +762,23 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           ) : (
             <label>
               <span>Email</span>
-              <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="student@example.com" autoComplete="email" />
+              <input type="email" name="email" value={form.email} onChange={handleChange} placeholder="student@example.com" autoComplete="email" maxLength={255} />
             </label>
           )}
 
           <label>
             <span>Password</span>
-            <input type="password" name="password" value={form.password} onChange={handleChange} placeholder="••••••••" autoComplete={isLogin ? 'current-password' : 'new-password'} />
+            <input type="password" name="password" value={form.password} onChange={handleChange} placeholder="••••••••" autoComplete={isLogin ? 'current-password' : 'new-password'} maxLength={128} />
           </label>
 
           {!isLogin && (
             <label>
               <span>Confirm password</span>
-              <input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Repeat your password" autoComplete="new-password" />
+              <input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Repeat your password" autoComplete="new-password" maxLength={128} />
             </label>
           )}
 
-          {submitError && <div className="form-error">{submitError}</div>}
+            {submitError && <div className="form-error" role="alert">{submitError}</div>}
 
           <button type="submit" className="button button-primary auth-submit" disabled={isSubmitting}>
             {isSubmitting ? (isLogin ? 'Signing in...' : 'Creating account...') : isLogin ? 'Log in' : 'Create account'}
@@ -670,6 +797,8 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
 function ProfilePage() {
   const { user, logout, loading } = useAuth();
   const navigate = useNavigate();
+  const [logoutError, setLogoutError] = useState('');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   if (loading) {
     return <LoadingScreen message="Loading your profile..." />;
@@ -680,8 +809,20 @@ function ProfilePage() {
   }
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/');
+    if (isLoggingOut) {
+      return;
+    }
+
+    setLogoutError('');
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/');
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'Unable to confirm logout.');
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   return (
@@ -713,8 +854,11 @@ function ProfilePage() {
 
         <div className="profile-actions">
           <Link className="button button-secondary" to="/">Back home</Link>
-          <button type="button" className="button button-primary" onClick={handleLogout}>Log out</button>
+          <button type="button" className="button button-primary" onClick={handleLogout} disabled={isLoggingOut}>
+            {isLoggingOut ? 'Logging out...' : 'Log out'}
+          </button>
         </div>
+        {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
       </div>
     </div>
   );

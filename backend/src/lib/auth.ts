@@ -21,7 +21,7 @@ export const safeUserFields = {
 } as const;
 
 export function normalizeUsername(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 export function normalizeEmail(value: string): string {
@@ -51,7 +51,7 @@ export async function verifyPassword(password: string, passwordHash: string): Pr
 
 export const registerSchema = z.object({
   username: z.string().trim().min(3).max(50),
-  email: z.string().trim().email(),
+  email: z.string().trim().max(255).email(),
   password: z.string().min(8).max(128),
 });
 

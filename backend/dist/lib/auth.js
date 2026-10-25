@@ -18,7 +18,7 @@ export const safeUserFields = {
     updatedAt: true,
 };
 export function normalizeUsername(value) {
-    return value.trim().replace(/\s+/g, ' ');
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 export function normalizeEmail(value) {
     return value.trim().toLowerCase();
@@ -41,7 +41,7 @@ export async function verifyPassword(password, passwordHash) {
 }
 export const registerSchema = z.object({
     username: z.string().trim().min(3).max(50),
-    email: z.string().trim().email(),
+    email: z.string().trim().max(255).email(),
     password: z.string().min(8).max(128),
 });
 export const loginSchema = z.object({

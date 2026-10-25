@@ -29,7 +29,9 @@ The current repository provides the landing page and an authentication foundatio
 - Responsive React landing page with VULNFORGE branding and product messaging.
 - Login, registration, and profile pages.
 - PostgreSQL-backed user records managed with Prisma.
-- Student and administrator roles, authenticated-session middleware, and a role-check middleware.
+- Module 2 authentication: validated student registration, email-or-username login, current-user restoration, logout, and a protected profile page.
+- Student and administrator roles, authenticated-session middleware, and role-check middleware.
+- PostgreSQL-backed sessions with an eight-hour cookie lifetime and periodic expired-session cleanup.
 - A backend health endpoint at `GET /api/health`.
 - Docker Compose configuration for PostgreSQL, the backend, and the frontend.
 - Focused backend authentication tests using Node's test runner and Supertest.
@@ -107,14 +109,13 @@ On macOS or Linux, use `cp .env.example .env`.
 | `NODE_ENV` | Backend runtime mode (`development`, `test`, or `production`). |
 | `PORT` | Backend HTTP port; defaults to `4000`. |
 | `DATABASE_URL` | PostgreSQL connection string. The local Compose mapping is host port `5433`, database `vulnforge`. |
-| `CORS_ORIGIN` | Allowed browser origin for credentialed backend requests; defaults to `http://localhost:5173`. |
-| `FRONTEND_URL` | Validated backend setting, defaulting to `http://localhost:5173`; it is not currently used by route logic. |
-| `SESSION_SECRET` | Secret used to sign session cookies. Set a unique local value of at least 32 characters; do not use the example placeholder or a development default for deployment. |
+| `CORS_ORIGIN` | One explicit allowed browser origin for credentialed backend requests; defaults to `http://localhost:5173`. Wildcard origins are not accepted. |
+| `SESSION_SECRET` | Required secret used to sign session cookies. Set a unique value of at least 32 characters in the ignored local `.env`; the example value is a placeholder and is rejected by the backend. |
 | `VULNFORGE_TEST_ADMIN_PASSWORD` | Required only by the development admin provisioner. Must be 8-128 characters with at least one letter and one number. |
 | `VULNFORGE_TEST_STUDENT_PASSWORD` | Optional test-only value used by the auth test to verify the existing test-student account. It does not create or reset that account. |
 | `VITE_API_URL` | Frontend API base URL; Compose sets it to `http://localhost:4000`, and the frontend uses that as its default. |
 
-The root `.env` is ignored by Git. Keep it untracked and never commit it. Do not put passwords, tokens, or other private values in source files, the README, screenshots, shell history, or logs. The root Prisma CLI configuration and the test-account seed/test scripts explicitly load the root `.env`. **The backend server does not load the root `.env` when started with the scripts below**: its dotenv call looks in the backend process's working directory. The backend defaults match the local ports and origins shown above, but any backend setting you need to override (especially `SESSION_SECRET`) must be provided in the backend process environment through your terminal or IDE launch configuration.
+The root `.env` is ignored by Git. Keep it untracked and never commit it. Do not put passwords, tokens, or other private values in source files, the README, screenshots, shell history, or logs. The backend loads the root `.env` file when started from the repository's backend scripts; Docker Compose also reads it for required backend environment values. Set `CORS_ORIGIN` to the exact frontend origin and `SESSION_SECRET` to a unique value of at least 32 characters. Never use the example placeholder as a runtime value.
 
 ## Database setup
 
@@ -142,7 +143,7 @@ npm run db:migrate
 npm run db:status
 ```
 
-The root `db:status` command connects to PostgreSQL to report migration status. Backend startup also attempts a database connection and logs whether it succeeded, but continues to listen if the connection fails. `GET /api/health` only reports that the HTTP backend responds; it is not a database connectivity check.
+The root `db:status` command connects to PostgreSQL to report migration status. Backend startup requires a successful database connection and exits without listening if the connection fails. `GET /api/health` reports that the HTTP backend responds; it is not a database connectivity check.
 
 Stop only the database service without deleting its persisted volume:
 
@@ -188,13 +189,17 @@ All authentication routes are under `/api/auth`. Requests and responses use JSON
 
 | Method and path | Behavior |
 | --- | --- |
-| `POST /api/auth/register` | Accepts `{ "username": "...", "email": "...", "password": "..." }`. Returns `201` with a safe `user` object and creates a `STUDENT`. Usernames must be 3-50 characters; passwords must be 8-128 characters and contain a letter and a number. Duplicate usernames/emails return `409`. Registration does not assign a role from request data. |
-| `POST /api/auth/login` | Accepts `{ "identifier": "email-or-username", "password": "..." }`. Returns `200` with a safe user object and establishes a server-side session; invalid credentials return `401`. |
+| `POST /api/auth/register` | Accepts `{ "username": "...", "email": "...", "password": "..." }`. Returns `201` with a safe `user` object and creates a `STUDENT`. Usernames must be 3-50 characters; email must be valid and no longer than 255 characters; passwords must be 8-128 characters and contain a letter and a number. Duplicate usernames/emails return `409`. Registration does not assign a role from request data or sign the user in. |
+| `POST /api/auth/login` | Accepts `{ "identifier": "email-or-username", "password": "..." }`. Returns `200` with a safe user object and establishes a server-side session after regenerating the session ID; invalid credentials return `401`. |
 | `GET /api/auth/me` | Requires a valid session. Returns `{ "user": { "id", "username", "email", "role", "createdAt", "updatedAt" } }`; without a valid session returns `401`. |
-| `POST /api/auth/logout` | Requires a valid session, destroys it, and clears the session cookie. Returns `200`; subsequent authenticated requests return `401`. |
+| `POST /api/auth/logout` | Requires a valid session, destroys it, and clears the session cookie. Returns `200` only after session destruction succeeds; subsequent authenticated requests return `401`. |
 | `GET /api/auth/admin-check` | Example role-protected route. Returns `200` for an authenticated `ADMIN`, `403` for an authenticated `STUDENT`, and `401` without authentication. |
 
-Registration only creates a user; it does not create the server-side login session. Log in after registration. Passwords are stored as bcrypt hashes, and the API does not return password hashes. The frontend sends credentialed requests so the browser can use the session cookie.
+Registration only creates a user; it does not create the server-side login session. After registration, the frontend confirms account creation and directs the user to log in. Authentication is restored by checking `/api/auth/me`; only a confirmed server session marks the frontend user as authenticated. Passwords are stored as bcrypt hashes, and the API does not return password hashes. The frontend sends credentialed requests so the browser can use the session cookie.
+
+Public registration creates `STUDENT` accounts only. `ADMIN` authorization is enforced by backend role middleware and an administrator must be provisioned through trusted backend code; hiding or showing frontend UI is not an authorization control.
+
+Outside automated tests, Express uses `connect-pg-simple` with the same `DATABASE_URL` used for application data. The PostgreSQL session table is created if missing; session rows carry the cookie expiry and expired rows are pruned hourly. The signed `vulnforge.sid` cookie is HTTP-only, `SameSite=Lax`, and expires after eight hours. In production it is marked `Secure`, so production deployment must use HTTPS. The secret is supplied by `SESSION_SECRET`; startup rejects missing, short, and example-placeholder secrets. Logout destroys the server-side session before clearing the cookie with compatible attributes.
 
 ### Development test accounts
 
@@ -230,7 +235,7 @@ Run commands from the repository root unless a command uses `npm --prefix`.
 | `npm run build:backend` | Compile the backend TypeScript project. |
 | `npm run build:frontend` | Type-check and build the frontend with Vite. |
 | `npm test` | Run both frontend and backend production build checks; it does not run unit tests. |
-| `npm --prefix backend run test:auth` | Run backend auth API tests. The provisioned-account integration case is skipped unless both test-password environment variables are set. |
+| `npm --prefix backend run test:auth` | Run backend auth tests. The API/integration and PostgreSQL session-store cases require the configured PostgreSQL database. The provisioned-account case is skipped unless both test-password environment variables are set. |
 | `npm run db:generate` | Generate Prisma Client from `prisma/schema.prisma`. |
 | `npm run db:migrate` | Apply development migrations using Prisma. |
 | `npm run db:status` | Check migration status against the configured database. |
@@ -240,12 +245,14 @@ Run commands from the repository root unless a command uses `npm --prefix`.
 
 There is no separate frontend unit-test script or standalone type-check script; the frontend build runs `tsc`. The backend auth tests use Node's built-in test runner through `tsx --test`.
 
+The authentication suite checks registration, input validation, duplicate and concurrent duplicate registration, password hashing, email/username login, session-ID rotation, `/me`, logout invalidation, cookie attributes, role authorization, sensitive-field exclusion, rate limiting, and PostgreSQL session persistence/expiry across separate store instances. Automated HTTP tests use Express's in-memory session store; the PostgreSQL store behavior is tested directly. The full suite does not simulate restarting the backend process. Frontend authentication flows have been manually exercised in a browser with mocked API responses; there is no frontend unit-test suite, and rapid duplicate-submit prevention has not been conclusively browser-verified.
+
 ## Troubleshooting
 
-- **Database connection fails:** Confirm the Compose `postgres` service is running (`docker compose ps`) and host port `5433` is available. The host connection uses `localhost:5433`; containers use `postgres:5432`. Check `DATABASE_URL` and run `npm run db:status`. Backend health can respond even if the database connection failed.
+- **Database connection fails:** Confirm the Compose `postgres` service is running (`docker compose ps`) and host port `5433` is available. The host connection uses `localhost:5433`; containers use `postgres:5432`. Check `DATABASE_URL` and run `npm run db:status`. Backend startup fails closed when its database connection cannot be established; `GET /api/health` only checks the HTTP process.
 - **Port already in use:** The defaults are PostgreSQL host port `5433`, backend port `4000`, and Vite port `5173`. Stop the conflicting service or adjust the local service configuration and corresponding URLs consistently.
 - **Prisma client or migration errors:** Install root dependencies, run `npm run db:generate`, and verify `DATABASE_URL` points to the existing database before `npm run db:migrate`. Inspect with `npm run db:status`; do not reset or delete the database as a first fix.
-- **Missing or invalid session secret:** Set `SESSION_SECRET` to a unique value at least 32 characters long in the backend process environment (not only in the root `.env`). Restart the backend after changing it; changing it invalidates cookies signed with the prior value.
+- **Missing or invalid session secret:** Set `SESSION_SECRET` to a unique value at least 32 characters long in the root `.env`. The application refuses to start without it or if it matches an example placeholder. Restart the backend after changing it; changing it invalidates cookies signed with the prior value.
 - **Frontend cannot reach the API or browser reports CORS errors:** Ensure the backend is listening on port `4000`; verify that the allowed `CORS_ORIGIN` matches the browser origin (normally `http://localhost:5173`) and that frontend requests include credentials. In Compose, the frontend's `VITE_API_URL` is `http://localhost:4000`.
 - **Test-account seeding fails:** Set `VULNFORGE_TEST_ADMIN_PASSWORD` locally and verify it is 8-128 characters with a letter and a number. If the account already exists with a different password, role, or conflicting identity, the script intentionally stops without modifying it.
 
@@ -253,13 +260,14 @@ There is no separate frontend unit-test script or standalone type-check script; 
 
 Current controls include bcrypt password hashing (12 rounds), validation of registration/login data, rate limits on registration and login, HTTP-only session cookies, credentialed CORS restricted to a configured origin, security headers via Helmet, and server-side authentication and role middleware. Public registration explicitly creates only `STUDENT` accounts. The test-admin script is a trusted development-only provisioning mechanism.
 
-The Compose PostgreSQL credentials are development defaults, not production credentials. The application currently uses Express's default in-memory session store; it is not suitable for production persistence or multiple backend instances. Before deployment, configure a strong secret, a production-grade persistent session store, production database credentials, HTTPS, and appropriate operational controls. The existing middleware and headers do not by themselves establish that the whole application is production-hardened.
+The Compose PostgreSQL credentials are development defaults, not production credentials. Outside automated tests, sessions are stored in PostgreSQL using the same `DATABASE_URL` as the application. `connect-pg-simple` creates the session table when missing and periodically removes expired sessions; session rows use the session cookie expiration, which is eight hours. Automated HTTP tests use Express's in-memory store. The session cookie is HTTP-only, same-site `lax`, and secure in production. Registration is limited to 10 requests per 15 minutes per client and login to 20 requests per 15 minutes; test mode uses a higher allowance for the suite. Before deployment, configure a strong secret, production database credentials, HTTPS, and appropriate operational controls. The existing middleware and headers do not by themselves establish that the whole application is production-hardened.
 
 Any intentionally vulnerable educational labs must be isolated from the main platform and must not be exposed publicly without appropriate sandboxing, network isolation, and access controls.
 
 ## Roadmap
 
-- **Completed foundation:** React landing page; PostgreSQL/Prisma setup and initial User/Role migration; student registration; session-based login/logout/current-user flow; protected profile route; role middleware and a minimal administrator check; development admin provisioner and backend auth tests.
+- **Completed Module 1 foundation:** React landing page and PostgreSQL/Prisma setup with the initial User/Role migration.
+- **Implemented Module 2 — Authentication & User Management (final operational verification pending):** Student registration; email-or-username login; session restoration and logout; protected profile; student/admin authorization; development admin provisioner; authentication and PostgreSQL session-store tests. Automated auth tests and both application builds pass. Full backend-process-restart persistence and browser verification of rapid duplicate-submit prevention remain outstanding; see [Scripts and tests](#scripts-and-tests).
 - **In progress:** No additional module is identified as in progress in the current repository.
 - **Planned:** Controlled vulnerability challenges/labs, flag submission, scoring and progress tracking, learning pathways, remediation guidance, leaderboards/analytics, and challenge administration.
 

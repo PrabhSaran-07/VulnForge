@@ -1,15 +1,22 @@
-﻿import dotenv from 'dotenv';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
-dotenv.config();
+dotenv.config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().default('postgresql://vulnforge:vulnforge_password@localhost:5433/vulnforge?schema=public'),
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
-  FRONTEND_URL: z.string().default('http://localhost:5173'),
-  SESSION_SECRET: z.string().min(32).default('change_me_in_development_only_please_32+chars'),
+  CORS_ORIGIN: z.string().url().refine((value) => {
+    try {
+      return value !== '*' && new URL(value).origin === value;
+    } catch {
+      return false;
+    }
+  }, 'CORS_ORIGIN must be one explicit frontend origin without a path.')
+    .default('http://localhost:5173'),
+  SESSION_SECRET: z.string().min(32),
 });
 
 export type AppEnvironment = z.infer<typeof envSchema>;
@@ -21,5 +28,13 @@ if (!parsed.success) {
   throw new Error('Environment validation failed.');
 }
 
-export const env = parsed.data;
+const env = parsed.data;
+
+if (/^(change_me|replace_with|your_.*|example)/i.test(env.SESSION_SECRET)) {
+  throw new Error(
+    'SESSION_SECRET must be set to a unique, strong secret; example and development placeholders are not permitted.',
+  );
+}
+
+export { env };
 export default env;
