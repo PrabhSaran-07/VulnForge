@@ -6,6 +6,7 @@ import pg from 'pg';
 import connectPgSimple from 'connect-pg-simple';
 import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
+import challengesRouter from './routes/challenges.js';
 import { env } from './config/env.js';
 
 const app = express();
@@ -75,6 +76,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/api', healthRouter);
 app.use('/api/auth', authRouter);
+app.use('/api', challengesRouter);
 
 app.use((_req, res) => {
   res.status(404).json({

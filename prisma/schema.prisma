@@ -11,6 +11,30 @@ enum Role {
   ADMIN
 }
 
+enum ChallengeDifficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum ChallengePublicationStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ChallengeAttemptStatus {
+  ACTIVE
+  SOLVED
+  STOPPED
+}
+
+enum FlagSubmissionResult {
+  CORRECT
+  INCORRECT
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   username     String   @unique @db.VarChar(50)
@@ -20,5 +44,112 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  challengeAttempts ChallengeAttempt[]
+  flagSubmissions   FlagSubmission[]
+  challengeSolves   ChallengeSolve[]
+
   @@map("users")
+}
+
+model Category {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique @db.VarChar(100)
+  name        String   @db.VarChar(100)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  challenges Challenge[]
+
+  @@map("categories")
+}
+
+model Challenge {
+  id                 String                     @id @default(uuid()) @db.Uuid
+  slug               String                     @unique @db.VarChar(120)
+  title              String                     @db.VarChar(200)
+  description        String
+  categoryId         String                     @map("category_id") @db.Uuid
+  difficulty         ChallengeDifficulty
+  points             Int
+  status             ChallengePublicationStatus @default(DRAFT)
+  learningObjectives String[]                   @default([]) @map("learning_objectives")
+  availableFrom      DateTime?                  @map("available_from")
+  availableUntil     DateTime?                  @map("available_until")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+
+  category    Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  secret      ChallengeSecret?
+  attempts    ChallengeAttempt[]
+  submissions FlagSubmission[]
+  solves      ChallengeSolve[]
+
+  @@index([categoryId, status, difficulty])
+  @@index([status, availableFrom, availableUntil])
+  @@map("challenges")
+}
+
+model ChallengeSecret {
+  challengeId        String   @id @map("challenge_id") @db.Uuid
+  verifierHash       String   @map("verifier_hash") @db.VarChar(128)
+  verifierKeyVersion String   @map("verifier_key_version") @db.VarChar(50)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@map("challenge_secrets")
+}
+
+model ChallengeAttempt {
+  id          String                 @id @default(uuid()) @db.Uuid
+  userId      String                 @map("user_id") @db.Uuid
+  challengeId String                 @map("challenge_id") @db.Uuid
+  status      ChallengeAttemptStatus @default(ACTIVE)
+  startedAt   DateTime               @default(now()) @map("started_at")
+  solvedAt    DateTime?              @map("solved_at")
+  stoppedAt   DateTime?              @map("stopped_at")
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  challenge   Challenge        @relation(fields: [challengeId], references: [id], onDelete: Restrict)
+  submissions FlagSubmission[]
+
+  @@unique([id, userId, challengeId])
+  @@index([userId, challengeId, status])
+  @@index([userId, startedAt])
+  @@map("challenge_attempts")
+}
+
+model FlagSubmission {
+  id          String               @id @default(uuid()) @db.Uuid
+  userId      String               @map("user_id") @db.Uuid
+  challengeId String               @map("challenge_id") @db.Uuid
+  attemptId   String               @map("attempt_id") @db.Uuid
+  result      FlagSubmissionResult
+  submittedAt DateTime             @default(now()) @map("submitted_at")
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  challenge Challenge        @relation(fields: [challengeId], references: [id], onDelete: Restrict)
+  attempt   ChallengeAttempt @relation(fields: [attemptId, userId, challengeId], references: [id, userId, challengeId], onDelete: Restrict)
+
+  @@index([userId, challengeId, submittedAt])
+  @@index([attemptId, submittedAt])
+  @@map("flag_submissions")
+}
+
+model ChallengeSolve {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  challengeId   String   @map("challenge_id") @db.Uuid
+  pointsAwarded Int      @map("points_awarded")
+  solvedAt      DateTime @default(now()) @map("solved_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, challengeId])
+  @@index([userId, solvedAt])
+  @@index([challengeId, solvedAt])
+  @@map("challenge_solves")
 }
