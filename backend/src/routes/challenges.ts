@@ -91,9 +91,7 @@ function internalError(res: Response) {
   });
 }
 
-router.use(requireAuth);
-
-router.get('/categories', async (_req, res) => {
+router.get('/categories', requireAuth, async (_req, res) => {
   const now = new Date();
   const availableChallenges = currentAvailability(now);
 
@@ -131,7 +129,7 @@ router.get('/categories', async (_req, res) => {
   }
 });
 
-router.get('/challenges', async (req, res) => {
+router.get('/challenges', requireAuth, async (req, res) => {
   const parsed = challengeListQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return invalidRequest(res, 'Provide valid category, difficulty, solved, page, and limit filters.');
@@ -196,7 +194,7 @@ router.get('/challenges', async (req, res) => {
   }
 });
 
-router.get('/challenges/:slug', async (req, res) => {
+router.get('/challenges/:slug', requireAuth, async (req, res) => {
   const parsedSlug = slugSchema.safeParse(req.params.slug);
   if (!parsedSlug.success) {
     return invalidRequest(res, 'Provide a valid challenge slug.');
@@ -245,7 +243,7 @@ router.get('/challenges/:slug', async (req, res) => {
   }
 });
 
-router.post('/challenges/:slug/attempts', async (req, res) => {
+router.post('/challenges/:slug/attempts', requireAuth, async (req, res) => {
   const parsedSlug = slugSchema.safeParse(req.params.slug);
   if (!parsedSlug.success) {
     return invalidRequest(res, 'Provide a valid challenge slug.');
@@ -345,7 +343,7 @@ router.post('/challenges/:slug/attempts', async (req, res) => {
   }
 });
 
-router.post('/challenges/:slug/attempts/:attemptId/stop', async (req, res) => {
+router.post('/challenges/:slug/attempts/:attemptId/stop', requireAuth, async (req, res) => {
   const parsedSlug = slugSchema.safeParse(req.params.slug);
   const parsedAttemptId = attemptIdSchema.safeParse(req.params.attemptId);
   if (!parsedSlug.success || !parsedAttemptId.success) {
@@ -425,6 +423,7 @@ router.post('/challenges/:slug/attempts/:attemptId/stop', async (req, res) => {
 
 router.post(
   '/challenges/:slug/attempts/:attemptId/submissions',
+  requireAuth,
   submissionUserLimiter,
   submissionIpLimiter,
   async (req, res) => {
