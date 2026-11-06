@@ -250,9 +250,6 @@ router.get('/challenges/:slug', requireAuth, async (req, res) => {
       challenge: {
         ...publicChallenge,
         solved: solves.length > 0,
-    return res.status(200).json({
-      challenge: {
-        ...challenge,
         lifecycleInstructions: {
           start: 'Start an attempt before working on this challenge.',
           activeAttempt: 'Starting again returns your current active attempt.',

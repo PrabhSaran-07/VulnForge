@@ -131,14 +131,11 @@ export async function persistSubmission(
       0,
       input.points - (hintPenalties._sum.penaltyPoints ?? 0),
     );
-
-  if (!alreadySolved) {
     await transaction.challengeSolve.create({
       data: {
         userId: input.userId,
         challengeId: input.challengeId,
         pointsAwarded,
-        pointsAwarded: input.points,
         solvedAt: input.submittedAt,
       },
     });
@@ -163,7 +160,6 @@ export async function persistSubmission(
   return {
     submission,
     pointsAwarded,
-    pointsAwarded: alreadySolved ? 0 : input.points,
     alreadySolved,
   };
 }
