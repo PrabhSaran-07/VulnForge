@@ -275,8 +275,8 @@ model ChallengeQuizResponse {
   isCorrect        Boolean @map("is_correct")
 
   attempt        ChallengeQuizAttempt  @relation(fields: [attemptId, challengeId], references: [id, challengeId], onDelete: Cascade)
-  question       ChallengeQuizQuestion @relation(fields: [questionId, challengeId], references: [id, challengeId], onDelete: Restrict)
-  selectedOption ChallengeQuizOption   @relation(fields: [selectedOptionId, questionId], references: [id, questionId], onDelete: Restrict)
+  question       ChallengeQuizQuestion @relation(fields: [questionId, challengeId], references: [id, challengeId], onDelete: NoAction)
+  selectedOption ChallengeQuizOption   @relation(fields: [selectedOptionId, questionId], references: [id, questionId], onDelete: NoAction)
 
   @@unique([attemptId, questionId])
   @@index([questionId])

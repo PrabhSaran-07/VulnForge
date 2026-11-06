@@ -91,36 +91,37 @@ export async function persistSubmission(transaction, input) {
             _sum: { penaltyPoints: true },
         });
         pointsAwarded = Math.max(0, input.points - (hintPenalties._sum.penaltyPoints ?? 0));
-    if (!alreadySolved) {
-        await transaction.challengeSolve.create({
-            data: {
+        if (!alreadySolved) {
+            await transaction.challengeSolve.create({
+                data: {
+                    userId: input.userId,
+                    challengeId: input.challengeId,
+                    pointsAwarded,
+                    pointsAwarded: input.points,
+                    solvedAt: input.submittedAt,
+                },
+            });
+        }
+        const attemptUpdate = await transaction.challengeAttempt.updateMany({
+            where: {
+                id: input.attemptId,
                 userId: input.userId,
                 challengeId: input.challengeId,
-                pointsAwarded,
-                pointsAwarded: input.points,
+                status: 'ACTIVE',
+            },
+            data: {
+                status: 'SOLVED',
                 solvedAt: input.submittedAt,
             },
         });
+        if (attemptUpdate.count !== 1) {
+            throw new Error('Challenge attempt changed state before it could be solved.');
+        }
+        return {
+            submission,
+            pointsAwarded,
+            pointsAwarded: alreadySolved ? 0 : input.points,
+            alreadySolved,
+        };
     }
-    const attemptUpdate = await transaction.challengeAttempt.updateMany({
-        where: {
-            id: input.attemptId,
-            userId: input.userId,
-            challengeId: input.challengeId,
-            status: 'ACTIVE',
-        },
-        data: {
-            status: 'SOLVED',
-            solvedAt: input.submittedAt,
-        },
-    });
-    if (attemptUpdate.count !== 1) {
-        throw new Error('Challenge attempt changed state before it could be solved.');
-    }
-    return {
-        submission,
-        pointsAwarded,
-        pointsAwarded: alreadySolved ? 0 : input.points,
-        alreadySolved,
-    };
 }

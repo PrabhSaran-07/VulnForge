@@ -341,4 +341,9 @@ test('quiz submission validates answers, scores on the server, and stores immuta
     assert.equal(otherProgress.body.points, 100);
     assert.equal(otherProgress.body.solvedChallenges, 1);
     assert.equal(otherProgress.body.recentQuizAttempts.length, 0);
+    await assert.rejects(prisma.challengeQuizQuestion.delete({ where: { id: firstQuestion.id } }));
+    await assert.rejects(prisma.challengeQuizOption.delete({ where: { id: correctFirst.id } }));
+    await prisma.challenge.delete({ where: { id: challenge.id } });
+    assert.equal(await prisma.challenge.findUnique({ where: { id: challenge.id } }), null);
+    challengeIds.delete(challenge.id);
 });

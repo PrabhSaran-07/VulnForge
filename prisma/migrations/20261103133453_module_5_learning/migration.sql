@@ -118,9 +118,9 @@ ALTER TABLE "challenge_quiz_attempts" ADD CONSTRAINT "challenge_quiz_attempts_ch
 ALTER TABLE "challenge_quiz_responses" ADD CONSTRAINT "challenge_quiz_responses_attempt_id_challenge_id_fkey"
     FOREIGN KEY ("attempt_id", "challenge_id") REFERENCES "challenge_quiz_attempts"("id", "challenge_id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "challenge_quiz_responses" ADD CONSTRAINT "challenge_quiz_responses_question_id_challenge_id_fkey"
-    FOREIGN KEY ("question_id", "challenge_id") REFERENCES "challenge_quiz_questions"("id", "challenge_id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    FOREIGN KEY ("question_id", "challenge_id") REFERENCES "challenge_quiz_questions"("id", "challenge_id") ON DELETE NO ACTION ON UPDATE CASCADE;
 ALTER TABLE "challenge_quiz_responses" ADD CONSTRAINT "challenge_quiz_responses_selected_option_id_question_id_fkey"
-    FOREIGN KEY ("selected_option_id", "question_id") REFERENCES "challenge_quiz_options"("id", "question_id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    FOREIGN KEY ("selected_option_id", "question_id") REFERENCES "challenge_quiz_options"("id", "question_id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 -- A zero-point solve is valid when accumulated hint penalties equal or exceed the award.
 ALTER TABLE "challenge_solves" DROP CONSTRAINT "challenge_solves_points_positive";
