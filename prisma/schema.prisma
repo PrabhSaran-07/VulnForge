@@ -93,6 +93,11 @@ model Challenge {
   explanation   ChallengeExplanation?
   quizQuestions ChallengeQuizQuestion[]
   quizAttempts  ChallengeQuizAttempt[]
+  category    Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  secret      ChallengeSecret?
+  attempts    ChallengeAttempt[]
+  submissions FlagSubmission[]
+  solves      ChallengeSolve[]
 
   @@index([categoryId, status, difficulty])
   @@index([status, availableFrom, availableUntil])
