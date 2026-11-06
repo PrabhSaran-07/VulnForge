@@ -1,4 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const localApiHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 export class ApiError extends Error {
   constructor(
@@ -64,4 +65,17 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
 
   return payload as T;
+}
+
+export function localApiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  let hostname: string;
+  try {
+    hostname = new URL(API_BASE).hostname.toLowerCase();
+  } catch {
+    throw new ApiError('The local authentication lab requires a valid local API URL.', null);
+  }
+  if (!localApiHosts.has(hostname)) {
+    throw new ApiError('Authentication simulations are available only against a local API.', null);
+  }
+  return apiRequest<T>(path, options);
 }

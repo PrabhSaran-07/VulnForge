@@ -8,8 +8,15 @@
   useRef,
   useState,
 } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, apiRequest } from './api';
+import AuthLabSimulator from './components/AuthLabSimulator';
+
+const authLabChallengeSlugs = new Set([
+  'auth-01-weak-authentication',
+  'auth-02-authentication-check',
+  'auth-03-password-reset',
+]);
 
 type UserRole = 'STUDENT' | 'ADMIN';
 
@@ -905,33 +912,6 @@ function DashboardPage() {
   );
 }
 
-function WorkspacePlaceholder({ section }: { section: 'Challenges' | 'Categories' | 'My Progress' }) {
-  const copy = {
-    Challenges: {
-      code: 'CHALLENGE CATALOGUE',
-      description: 'Challenge browsing, attempts, and submissions are planned for a later module. No challenges are available to launch yet.',
-    },
-    Categories: {
-      code: 'LEARNING CATEGORIES',
-      description: 'Security learning categories are planned. Category content will appear here when the catalogue is implemented.',
-    },
-    'My Progress': {
-      code: 'LEARNING PROGRESS',
-      description: 'Progress summaries will be based on real challenge activity. Tracking is not available yet, so no statistics are shown.',
-    },
-  }[section];
-
-  return (
-    <section className="workspace-placeholder">
-      <SectionCode>[ {copy.code} ]</SectionCode>
-      <h1>{section}</h1>
-      <p>{copy.description}</p>
-      <span className="workspace-planned-badge"><span className="signal-dot" /> PLANNED — NOT AVAILABLE YET</span>
-      <Link className="workspace-text-link" to="/dashboard">← BACK TO DASHBOARD</Link>
-    </section>
-  );
-}
-
 function ProfilePage() {
   const { user } = useAuth();
 
@@ -982,14 +962,85 @@ type ChallengeListItem = {
   solved: boolean;
 };
 
+type ChallengeCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  challengeCount: number;
+};
+
+function CategoriesPage() {
+  const [categories, setCategories] = useState<ChallengeCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<{ categories: ChallengeCategory[] }>('/api/categories')
+      .then((data) => {
+        if (active) {
+          setCategories(data.categories);
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setError(requestError instanceof Error ? requestError.message : 'Unable to load categories.');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section className="learning-page">
+      <SectionCode>[ LEARNING CATEGORIES ]</SectionCode>
+      <h1>Categories</h1>
+      <p className="learning-intro">Browse published challenges by security topic.</p>
+      {loading && <p role="status">Loading categories...</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {!loading && !error && categories.length === 0 && (
+        <p className="learning-empty">No categories with available challenges were found.</p>
+      )}
+      {!loading && categories.length > 0 && (
+        <div className="challenge-grid">
+          {categories.map((category) => (
+            <article className="learning-card challenge-card" key={category.id}>
+              <h2>{category.name}</h2>
+              <p>{category.description ?? 'Explore published challenges in this topic.'}</p>
+              <p>{category.challengeCount} {category.challengeCount === 1 ? 'challenge' : 'challenges'}</p>
+              <Link className="workspace-text-link" to={`/challenges?category=${encodeURIComponent(category.slug)}`}>
+                VIEW CHALLENGES <span aria-hidden="true">→</span>
+              </Link>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ChallengeCatalogPage() {
+  const [searchParams] = useSearchParams();
+  const categorySlug = searchParams.get('category');
   const [challenges, setChallenges] = useState<ChallengeListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let active = true;
-    apiRequest<{ challenges: ChallengeListItem[] }>('/api/challenges?limit=100')
+    const query = new URLSearchParams({ limit: '100' });
+    if (categorySlug) {
+      query.set('category', categorySlug);
+    }
+    apiRequest<{ challenges: ChallengeListItem[] }>(`/api/challenges?${query}`)
       .then((data) => {
         if (active) {
           setChallenges(data.challenges);
@@ -1009,17 +1060,18 @@ function ChallengeCatalogPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [categorySlug]);
 
   return (
     <section className="learning-page">
       <SectionCode>[ CHALLENGE CATALOGUE ]</SectionCode>
-      <h1>Challenges</h1>
+      <h1>{categorySlug ? 'Category challenges' : 'Challenges'}</h1>
       <p className="learning-intro">Practice in controlled challenges, then review the defensive lessons and knowledge check.</p>
+      {categorySlug && <Link className="workspace-text-link" to="/challenges">SHOW ALL CHALLENGES</Link>}
       {loading && <p role="status">Loading available challenges...</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       {!loading && !error && challenges.length === 0 && (
-        <p className="learning-empty">No published challenges are currently available.</p>
+        <p className="learning-empty">{categorySlug ? 'No published challenges are currently available in this category.' : 'No published challenges are currently available.'}</p>
       )}
       {!loading && challenges.length > 0 && (
         <div className="challenge-grid">
@@ -1380,6 +1432,10 @@ function ChallengeDetailPage() {
         )}
       </section>
 
+      {import.meta.env.DEV && authLabChallengeSlugs.has(challenge.slug) && (
+        <AuthLabSimulator slug={challenge.slug} />
+      )}
+
       {error && <p className="form-error" role="alert">{error}</p>}
       {notice && <p className="learning-notice" role="status">{notice}</p>}
 
@@ -1625,7 +1681,7 @@ function WorkspacePage() {
       content = <ChallengeCatalogPage />;
       break;
     case '/categories':
-      content = <WorkspacePlaceholder section="Categories" />;
+      content = <CategoriesPage />;
       break;
     case '/progress':
       content = <ProgressPage />;

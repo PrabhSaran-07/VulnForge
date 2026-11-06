@@ -4,7 +4,7 @@
 
 VULNFORGE is an educational cybersecurity platform that helps learners investigate published challenges, submit flags, track progress, and study remediation guidance.
 
-The current repository provides the landing page, authentication, protected student workspace, the Module 4 challenge and flag-submission engine, and Module 5 hints, explanations, quizzes, and learning progress. Challenge runtime execution and challenge-authoring UI are not implemented.
+The current repository provides the landing page, authentication, protected student workspace, the Module 4 challenge and flag-submission engine, Module 5 learning features, and three local-only Module 6 authentication-security simulations. Challenge runtime execution and challenge-authoring UI are not implemented.
 
 ## Contents
 
@@ -16,6 +16,7 @@ The current repository provides the landing page, authentication, protected stud
 - [Database setup](#database-setup)
 - [Install and run](#install-and-run)
 - [Authentication and test accounts](#authentication-and-test-accounts)
+- [Module 6 authentication security lab](#module-6-authentication-security-lab)
 - [Scripts and tests](#scripts-and-tests)
 - [Troubleshooting](#troubleshooting)
 - [Security notes](#security-notes)
@@ -40,6 +41,8 @@ The current repository provides the landing page, authentication, protected stud
 - Module 4 challenge catalogue, attempt lifecycle, server-side flag verification, solve records, and scoring.
 - Module 5 ordered hints with per-user reveal records, confirmed penalties, and server-side adjusted solve awards.
 - Post-solve explanations, multiple-choice knowledge checks, immutable quiz-attempt results, and authenticated learning progress.
+- Module 6 AUTH-01, AUTH-02, and AUTH-03 content authored through the existing challenge, secret, hint, explanation, and quiz models; no new database models or migrations.
+- Authenticated local simulation endpoints for weak authentication, flawed authentication checks, and reset-token lifecycle concepts. They use synthetic data, require explicit local enablement and a loopback connection, and are not mounted in production.
 - Focused backend authentication, challenge, schema, and learning API tests using Node's test runner and Supertest.
 
 Authentication uses server-managed sessions. Passwords are hashed with bcryptjs before storage. Registration always creates a `STUDENT`; an administrator can only be provisioned through trusted backend code.
@@ -70,11 +73,12 @@ Versions below are the versions/ranges declared in the package manifests and loc
 ├── backend/
 │   ├── src/
 │   │   ├── config/       # Backend environment parsing and validation
-│   │   ├── lib/          # Prisma client and auth helpers
+│   │   ├── lib/          # Prisma client, auth helpers, and local lab content/simulations
 │   │   ├── middleware/   # Authentication and role checks
-│   │   ├── routes/       # Health, authentication, challenge, and learning APIs
-│   │   ├── scripts/      # Development test-admin provisioning
+│   │   ├── routes/       # Health, authentication, challenge, learning, and local lab APIs
+│   │   ├── scripts/      # Development test-admin and auth-lab provisioning
 │   │   ├── auth.test.ts  # Backend authentication tests
+│   │   ├── auth-lab.test.ts # Local authentication-lab tests
 │   │   └── learning.test.ts # Backend learning API tests
 │   ├── Dockerfile
 │   └── package.json
@@ -82,13 +86,13 @@ Versions below are the versions/ranges declared in the package manifests and loc
 ├── docker/               # Reserved
 ├── docs/                 # Reserved
 ├── frontend/
-│   ├── src/              # React app, protected routes, shared API client, and styles
+│   ├── src/              # React app, protected routes, local lab controls, API client, and styles
 │   ├── public/
 │   ├── Dockerfile
 │   └── package.json
 ├── prisma/
 │   ├── migrations/       # Versioned database migrations
-│   └── schema.prisma     # User model and role enum
+│   └── schema.prisma     # User, challenge, and learning models
 ├── .env.example          # Environment-variable template; contains placeholders only
 ├── docker-compose.yml
 ├── package.json          # Root Prisma, Docker, and build scripts
@@ -118,7 +122,9 @@ On macOS or Linux, use `cp .env.example .env`.
 | `DATABASE_URL` | PostgreSQL connection string. The local Compose mapping is host port `5433`, database `vulnforge`. |
 | `CORS_ORIGIN` | One explicit allowed browser origin for credentialed backend requests; defaults to `http://localhost:5173`. Wildcard origins are not accepted. |
 | `SESSION_SECRET` | Required secret used to sign session cookies. Set a unique value of at least 32 characters in the ignored local `.env`; the example value is a placeholder and is rejected by the backend. |
-| `VULNFORGE_FLAG_HMAC_KEYS` | Optional JSON object mapping verifier key versions to base64-encoded random keys of at least 32 bytes, used only by the backend to verify challenge flags (for example, `{"v1":"<base64-key>"}`). Keep old versions configured until corresponding verifier hashes have been rotated. Never use a flag itself as a key. |
+| `VULNFORGE_FLAG_HMAC_KEYS` | JSON object mapping verifier key versions to base64-encoded random keys of at least 32 bytes, used only by the backend to verify challenge flags (for example, `{"v1":"<base64-key>"}`). Required to seed AUTH challenges. Keep old versions configured until corresponding verifier hashes have been rotated. Never use a flag itself as a key. |
+| `VULNFORGE_ENABLE_LOCAL_AUTH_LAB` | Must be `true` with `NODE_ENV=development` to enable local AUTH simulations; production mode always disables them, and loopback requests are still required. |
+| `VULNFORGE_AUTH_LAB_FLAGS` | Required only by the local auth-lab seed. JSON object containing distinct private `AUTH-01`, `AUTH-02`, and `AUTH-03` flag values; keep only in ignored `.env`. |
 | `VULNFORGE_TEST_ADMIN_PASSWORD` | Required only by the development admin provisioner. Must be 8-128 characters with at least one letter and one number. |
 | `VULNFORGE_TEST_STUDENT_PASSWORD` | Optional test-only value used by the auth test to verify the existing test-student account. It does not create or reset that account. |
 | `VITE_API_URL` | Frontend API base URL; Compose sets it to `http://localhost:4000`, and the frontend uses that as its default. |
@@ -232,6 +238,61 @@ The script creates `testadmin` with the `ADMIN` role using the same bcrypt helpe
 
 Log in at `http://localhost:5173/login` using the email and locally configured password. The profile page displays the current role. The `GET /api/auth/me` response also includes the role. The automated auth test exercises login, session verification, logout, hash verification, and the actual student/admin role checks when both test-password variables are set.
 
+## Module 6 authentication security lab
+
+Module 6 adds three AUTH challenges to the existing challenge catalogue and detail workflow:
+
+| Challenge | Focus |
+| --- | --- |
+| AUTH-01 — Weak Authentication Scenario | Synthetic credentials, password-storage comparison, generic failures, password policy, and repeated-failure controls. |
+| AUTH-02 — Authentication-Check Flaw | Server-validated identity, authentication versus authorization, and fixed examples of account-enumeration response differences. |
+| AUTH-03 — Password-Reset Design Weakness | Synthetic reset-token generation and validation, expiry, one-time use, new-password confirmation, and simulated session invalidation. |
+
+Each challenge uses the existing `Category`, `Challenge`, `ChallengeSecret`, ordered `ChallengeHint`, `ChallengeExplanation`, and quiz models. Flags remain HMAC-verified by the Module 4 submission path; explanations, answer keys, and quiz results use the Module 5 APIs. The seed is additive and idempotent when all three challenge slugs already exist. **No Prisma model or migration was added.**
+
+The vulnerable behaviors are deterministic, synthetic comparisons—not a vulnerable login service. They use no real platform accounts or credentials, make no outbound requests, send no email, and do not alter VulnForge sessions. Reset tokens are generated and validated only in backend memory and are never returned to the browser. Simulation state is volatile and is cleared by a backend restart.
+
+The simulation API is available only when `NODE_ENV=development` and `VULNFORGE_ENABLE_LOCAL_AUTH_LAB=true` (tests enable it automatically). It also rejects non-loopback connections. In development, authenticated loopback learners can still browse seeded AUTH challenge content when the simulation API is disabled; the detail page displays an explicit unavailable message instead of hiding the category. Production and non-loopback catalogue requests do not receive the AUTH challenges. The frontend renders simulation controls only in a development build and refuses a non-loopback API base URL. Never enable the lab on a public deployment.
+
+### Local setup
+
+1. In the ignored root `.env`, set `VULNFORGE_ENABLE_LOCAL_AUTH_LAB=true`. Keep `NODE_ENV=development`.
+2. Configure `VULNFORGE_FLAG_HMAC_KEYS` with the same private backend keyring used by the Module 4 verifier.
+3. Set `VULNFORGE_AUTH_LAB_FLAGS` to a JSON object with distinct `AUTH-01`, `AUTH-02`, and `AUTH-03` properties, each containing a locally chosen `VULNFORGE{...}` value. Keep these values in `.env`; do not commit or expose them.
+4. Apply the existing migrations and seed the content. The seed requires all four local settings above and leaves existing complete challenge sets unchanged:
+
+   ```powershell
+   npm run db:generate
+   npm run db:migrate
+   npm --prefix backend run seed
+   npm run db:status
+   ```
+
+5. Start the backend and frontend with `npm run dev:backend` and `npm run dev:frontend`, sign in with a student account, and open `/challenges`. The three AUTH challenges use normal attempts, flag submissions, hints, post-solve explanations, quizzes, and progress.
+
+### Verification status
+
+Final local verification: all 72 backend tests passed; backend and frontend production builds passed; Prisma formatting and validation passed; and all three existing migrations are current. PostgreSQL contains the Authentication Security category and all three published AUTH challenges with objectives, ordered hints, explanations, quizzes, and HMAC-backed secret records. Running the seed twice was idempotent. The production frontend bundle scan found no AUTH challenge labels, flag literals, HMAC setting name, or reset-token markers. No frontend automated test or browser-test runner is configured.
+
+An authenticated synthetic learner completed the database-backed API workflow for all three challenges: catalogue and detail retrieval, ordered hints and penalties, flag submission, solved explanations, stored quiz results, and progress. In the actual local frontend, the category and three challenges appeared; each detail page rendered its simulator; AUTH-01 and AUTH-02 comparisons worked; and AUTH-03 covered reset request, tampered and expired rejection, successful reset, synthetic-session invalidation, and replay rejection without displaying a token. The disabled-simulation notice was also verified while challenge content remained visible. Progress showed three solved challenges, six hints, and three quiz attempts. Production and loopback gating are covered by automated checks; a separate production-mode server and non-loopback HTTP request were not launched.
+
+If the seed is rerun after all three challenge slugs already exist, it leaves their content and secrets unchanged. If only some slugs exist, it stops without changing records. To change locally authored content, use reviewed database tooling; the seed does not overwrite existing learner records or challenges.
+
+### Simulation API
+
+All paths require the existing authenticated learner session and loopback network access:
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/auth-lab/status` | Confirms local simulation availability without returning secret or simulation state. |
+| `POST /api/auth-lab/weak-authentication` | Compares the fixed synthetic account against vulnerable and secure authentication designs. Accepts only a bounded synthetic username/password pair. |
+| `POST /api/auth-lab/authentication-check` | Runs one fixed scenario from an allowlist; it cannot search for accounts or contact another service. |
+| `GET /api/auth-lab/password-reset` | Returns sanitized synthetic reset state without a token. |
+| `POST /api/auth-lab/password-reset/request` | Starts a local reset flow; returns a generic message, never a link or token. |
+| `POST /api/auth-lab/password-reset/confirm` | Tests valid, modified, expired, or replayed synthetic reset actions. A completed action requires a new synthetic password. |
+
+The API uses rate limiting and per-learner in-memory state. It is not a production password-reset implementation; the real Module 2 authentication routes, session store, and middleware are unchanged.
+
 ## Scripts and tests
 
 Run commands from the repository root unless a command uses `npm --prefix`.
@@ -248,14 +309,16 @@ Run commands from the repository root unless a command uses `npm --prefix`.
 | `npm run db:migrate` | Apply development migrations using Prisma. |
 | `npm run db:status` | Check migration status against the configured database. |
 | `npm --prefix backend run seed:test-admin` | Idempotently provision the development administrator from the configured password. |
+| `npm --prefix backend run seed` | Add the three AUTH challenges in explicitly enabled development mode using local flag values and the configured verifier keyring. |
+| `npm --prefix backend run seed:auth-lab` | Alias for the local authentication-lab seed. |
 | `docker compose up --build` | Build and start all Compose services. |
 | `docker compose stop postgres` | Stop only the PostgreSQL service and retain its named volume. |
 
 There is no separate frontend unit-test script or standalone type-check script; the frontend build runs `tsc`. The backend auth tests use Node's built-in test runner through `tsx --test`.
 
-The frontend build checks TypeScript and compiles the application; no frontend unit-test or browser-test runner is configured. For manual verification, sign in at `/login`, browse `/challenges`, start an attempt, submit a flag, reveal ordered hints, solve a configured challenge, review its explanation, submit its knowledge check, and inspect `/progress`. Refresh to check session restoration and repeat at a narrow viewport to inspect the mobile navigation. Browser verification is not claimed by the automated build.
+The frontend build checks TypeScript and compiles the application; no frontend unit-test or browser-test runner is configured. The local browser workflow above used the real backend and PostgreSQL rather than mocked API responses. The automated test suite uses Express's in-memory session store; the PostgreSQL store behavior is tested directly. The full suite does not simulate restarting the backend process.
 
-The authentication suite checks registration, input validation, duplicate and concurrent duplicate registration, password hashing, email/username login, session-ID rotation, `/me`, logout invalidation, cookie attributes, role authorization, sensitive-field exclusion, rate limiting, and PostgreSQL session persistence/expiry across separate store instances. Automated HTTP tests use Express's in-memory session store; the PostgreSQL store behavior is tested directly. The full suite does not simulate restarting the backend process. Frontend authentication flows have been manually exercised in a browser with mocked API responses; there is no frontend unit-test suite, and rapid duplicate-submit prevention has not been conclusively browser-verified.
+The authentication suite checks registration, input validation, duplicate and concurrent duplicate registration, password hashing, email/username login, session-ID rotation, `/me`, logout invalidation, cookie attributes, role authorization, sensitive-field exclusion, rate limiting, and PostgreSQL session persistence/expiry across separate store instances. The Module 6 tests cover local-only gates, fixed scenario behavior, reset expiry, one-time use, validation, and absence of reset-token data in responses. Automated HTTP tests use Express's in-memory session store; the PostgreSQL store behavior is tested directly, and the full suite does not simulate restarting the backend process. A synthetic learner was registered and signed in through the actual local backend for the Module 6 browser workflow. There is no frontend unit-test suite, and rapid duplicate-submit prevention has not been conclusively browser-verified.
 
 ## Troubleshooting
 
@@ -276,6 +339,8 @@ Flag submissions are limited to 10 per authenticated user and 100 per client IP 
 
 Any intentionally vulnerable educational labs must be isolated from the main platform and must not be exposed publicly without appropriate sandboxing, network isolation, and access controls.
 
+The Module 6 exercises are simulations, not sandboxes: they are available only in explicitly enabled development mode and from loopback requests. Do not deploy them publicly or use their synthetic design examples as production authentication code. The simulated reset flow has no email delivery, durable tokens, or real-account effects.
+
 ## Roadmap
 
 - **Completed Module 1 foundation:** React landing page and PostgreSQL/Prisma setup with the initial User/Role migration.
@@ -283,6 +348,7 @@ Any intentionally vulnerable educational labs must be isolated from the main pla
 - **Implemented Module 3 MVP — Student Dashboard & Navigation:** Protected dashboard and shared workspace layout; session restoration through `/api/auth/me`; responsive navigation; account/profile and logout; shared credentialed API helper with 401/403 error messages.
 - **Implemented Module 4 — Challenge Engine:** Authenticated catalogue and details, attempt lifecycle, rate-limited server-side HMAC flag verification, unique solve records, and server-calculated points. No vulnerable runtime/container execution is included.
 - **Implemented Module 5 — Hints, Explanations & Learning Checks:** Sequential hint reveals and penalties; post-solve structured explanations; secure multiple-choice quiz submission and stored results; dashboard and progress views. Penalties reduce the solve award and are applied once when the server records the solve. Automated backend tests and production builds pass; browser verification remains a manual check.
+- **Completed Module 6 — Authentication Security Lab:** Three seeded challenge records with HMAC-backed flags, ordered hints, explanations, quizzes, and authenticated learner progress; local-only AUTH-01/02/03 simulations guarded by explicit development configuration and loopback checks. The database-backed learner workflow and local browser simulations were verified. No schema migration was required.
 - **Planned:** Challenge runtime environments, challenge-authoring UI, learning pathways, leaderboards, and analytics.
 
 Folders reserved for future work are not evidence that those features are implemented.

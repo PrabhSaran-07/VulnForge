@@ -10,7 +10,10 @@
     "db:generate": "prisma generate --schema ../prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema ../prisma/schema.prisma",
     "db:status": "prisma migrate status --schema ../prisma/schema.prisma",
+    "test": "npm run test:auth",
     "test:auth": "tsx --test src/**/*.test.ts",
+    "seed": "tsx src/scripts/seed-auth-lab.ts",
+    "seed:auth-lab": "tsx src/scripts/seed-auth-lab.ts",
     "seed:test-admin": "tsx src/scripts/seed-test-admin.ts"
   },
   "dependencies": {

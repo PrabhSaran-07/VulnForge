@@ -7,7 +7,9 @@ import connectPgSimple from 'connect-pg-simple';
 import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
 import challengesRouter from './routes/challenges.js';
+import authLabRouter from './routes/auth-lab.js';
 import { env } from './config/env.js';
+import { isAuthLabEnabled } from './lib/auth-lab.js';
 
 const app = express();
 const sessionCookie = {
@@ -76,6 +78,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/api', healthRouter);
 app.use('/api/auth', authRouter);
+if (isAuthLabEnabled(env.NODE_ENV, env.VULNFORGE_ENABLE_LOCAL_AUTH_LAB)) {
+  app.use('/api/auth-lab', authLabRouter);
+}
 app.use('/api', challengesRouter);
 
 app.use((_req, res) => {
