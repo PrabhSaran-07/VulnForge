@@ -8,6 +8,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(4000),
   VULNFORGE_ENABLE_LOCAL_AUTH_LAB: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  VULNFORGE_ENABLE_LOCAL_ACCESS_LAB: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   DATABASE_URL: z.string().default('postgresql://vulnforge:vulnforge_password@localhost:5433/vulnforge?schema=public'),
   CORS_ORIGIN: z.string().url().refine((value) => {
     try {

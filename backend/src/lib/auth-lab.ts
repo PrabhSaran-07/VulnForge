@@ -7,6 +7,17 @@ export const AUTH_LAB_CHALLENGE_SLUGS = [
   'auth-03-password-reset',
 ] as const;
 
+export const ACCESS_CONTROL_LAB_CHALLENGE_SLUGS = [
+  'ac-01-object-level-access-control',
+  'ac-02-role-permission-enforcement',
+  'ac-03-privilege-boundary-failure',
+] as const;
+
+export const LOCAL_SECURITY_LAB_CHALLENGE_SLUGS = [
+  ...AUTH_LAB_CHALLENGE_SLUGS,
+  ...ACCESS_CONTROL_LAB_CHALLENGE_SLUGS,
+] as const;
+
 const demoUsername = 'demo.learner';
 const demoPassword = 'weak1';
 const resetLifetimeMs = 15 * 60 * 1000;
@@ -48,6 +59,8 @@ export class AuthLabError extends Error {
 export function isAuthLabEnabled(nodeEnv: string, explicitlyEnabled: boolean): boolean {
   return nodeEnv === 'test' || (nodeEnv === 'development' && explicitlyEnabled);
 }
+
+export const isAccessControlLabEnabled = isAuthLabEnabled;
 
 export function isAuthLabContentVisible(nodeEnv: string, address: string | undefined): boolean {
   return nodeEnv === 'test'

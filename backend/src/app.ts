@@ -8,8 +8,9 @@ import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
 import challengesRouter from './routes/challenges.js';
 import authLabRouter from './routes/auth-lab.js';
+import accessControlLabRouter from './routes/access-control-lab.js';
 import { env } from './config/env.js';
-import { isAuthLabEnabled } from './lib/auth-lab.js';
+import { isAccessControlLabEnabled, isAuthLabEnabled } from './lib/auth-lab.js';
 
 const app = express();
 const sessionCookie = {
@@ -80,6 +81,9 @@ app.use('/api', healthRouter);
 app.use('/api/auth', authRouter);
 if (isAuthLabEnabled(env.NODE_ENV, env.VULNFORGE_ENABLE_LOCAL_AUTH_LAB)) {
   app.use('/api/auth-lab', authLabRouter);
+}
+if (isAccessControlLabEnabled(env.NODE_ENV, env.VULNFORGE_ENABLE_LOCAL_ACCESS_LAB)) {
+  app.use('/api/access-lab', accessControlLabRouter);
 }
 app.use('/api', challengesRouter);
 

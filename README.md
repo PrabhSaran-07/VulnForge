@@ -4,7 +4,7 @@
 
 VULNFORGE is an educational cybersecurity platform that helps learners investigate published challenges, submit flags, track progress, and study remediation guidance.
 
-The current repository provides the landing page, authentication, protected student workspace, the Module 4 challenge and flag-submission engine, Module 5 learning features, and three local-only Module 6 authentication-security simulations. Challenge runtime execution and challenge-authoring UI are not implemented.
+The current repository provides the landing page, authentication, protected student workspace, the Module 4 challenge and flag-submission engine, Module 5 learning features, and local-only Module 6 authentication and Module 7 access-control simulations. Challenge runtime execution and challenge-authoring UI are not implemented.
 
 ## Contents
 
@@ -17,6 +17,7 @@ The current repository provides the landing page, authentication, protected stud
 - [Install and run](#install-and-run)
 - [Authentication and test accounts](#authentication-and-test-accounts)
 - [Module 6 authentication security lab](#module-6-authentication-security-lab)
+- [Module 7 access control security lab](#module-7-access-control-security-lab)
 - [Scripts and tests](#scripts-and-tests)
 - [Troubleshooting](#troubleshooting)
 - [Security notes](#security-notes)
@@ -43,6 +44,7 @@ The current repository provides the landing page, authentication, protected stud
 - Post-solve explanations, multiple-choice knowledge checks, immutable quiz-attempt results, and authenticated learning progress.
 - Module 6 AUTH-01, AUTH-02, and AUTH-03 content authored through the existing challenge, secret, hint, explanation, and quiz models; no new database models or migrations.
 - Authenticated local simulation endpoints for weak authentication, flawed authentication checks, and reset-token lifecycle concepts. They use synthetic data, require explicit local enablement and a loopback connection, and are not mounted in production.
+- Module 7 AC-01, AC-02, and AC-03 content and simulations use the same challenge, HMAC-secret, hint, explanation, and quiz infrastructure; no new database models or migrations.
 - Focused backend authentication, challenge, schema, and learning API tests using Node's test runner and Supertest.
 
 Authentication uses server-managed sessions. Passwords are hashed with bcryptjs before storage. Registration always creates a `STUDENT`; an administrator can only be provisioned through trusted backend code.
@@ -125,6 +127,8 @@ On macOS or Linux, use `cp .env.example .env`.
 | `VULNFORGE_FLAG_HMAC_KEYS` | JSON object mapping verifier key versions to base64-encoded random keys of at least 32 bytes, used only by the backend to verify challenge flags (for example, `{"v1":"<base64-key>"}`). Required to seed AUTH challenges. Keep old versions configured until corresponding verifier hashes have been rotated. Never use a flag itself as a key. |
 | `VULNFORGE_ENABLE_LOCAL_AUTH_LAB` | Must be `true` with `NODE_ENV=development` to enable local AUTH simulations; production mode always disables them, and loopback requests are still required. |
 | `VULNFORGE_AUTH_LAB_FLAGS` | Required only by the local auth-lab seed. JSON object containing distinct private `AUTH-01`, `AUTH-02`, and `AUTH-03` flag values; keep only in ignored `.env`. |
+| `VULNFORGE_ENABLE_LOCAL_ACCESS_LAB` | Must be `true` with `NODE_ENV=development` to mount the local AC simulation API; production mode always disables it, and loopback requests are still required. |
+| `VULNFORGE_ACCESS_LAB_FLAGS` | Required only by the access-lab seed. JSON object containing distinct private `AC-01`, `AC-02`, and `AC-03` flag values; keep only in ignored `.env`. |
 | `VULNFORGE_TEST_ADMIN_PASSWORD` | Required only by the development admin provisioner. Must be 8-128 characters with at least one letter and one number. |
 | `VULNFORGE_TEST_STUDENT_PASSWORD` | Optional test-only value used by the auth test to verify the existing test-student account. It does not create or reset that account. |
 | `VITE_API_URL` | Frontend API base URL; Compose sets it to `http://localhost:4000`, and the frontend uses that as its default. |
@@ -293,6 +297,47 @@ All paths require the existing authenticated learner session and loopback networ
 
 The API uses rate limiting and per-learner in-memory state. It is not a production password-reset implementation; the real Module 2 authentication routes, session store, and middleware are unchanged.
 
+## Module 7 access control security lab
+
+Module 7 adds three Access Control challenges to the existing challenge and learning workflow:
+
+| Challenge | Focus |
+| --- | --- |
+| AC-01 — Object-Level Access Control (IDOR/BOLA) | Compare identifier-only access to a synthetic document with server-side ownership validation. |
+| AC-02 — Role and Permission Enforcement | Compare an overly broad authenticated-user decision with a server-side STUDENT/ADMIN permission policy. |
+| AC-03 — Privilege Boundary Failure | Compare trusting a synthetic privilege request with server-side least-privilege enforcement. |
+
+Learning objectives cover object-level authorization, authentication versus authorization, server-enforced permissions, and privilege boundaries. The seed stores objectives, ordered hints and penalties, structured explanations, quiz questions/options, and HMAC-backed private flags through existing Module 4/5 models. It is additive and idempotent when all three slugs already exist; partial existing sets cause it to stop without changes. **No Prisma schema changes or migration were required.**
+
+All simulator cases use fixed synthetic resources and role/action fixtures. Client requests can select only an allowlisted case; actor identity for object ownership comes from the authenticated session, and no caller-provided owner or role is accepted. Simulation results do not access real application objects or modify VulnForge users, roles, permissions, or sessions. The APIs require an authenticated session, are mounted only in explicitly enabled development mode (or test mode), reject non-loopback requests, and are rate-limited. Production catalogue and detail routes exclude the AC challenges. The frontend displays controls only in development and shows an explicit unavailable state if the API is disabled.
+
+### Local setup and verification
+
+1. Keep `NODE_ENV=development` and configure the existing backend-only `VULNFORGE_FLAG_HMAC_KEYS` keyring.
+2. Set `VULNFORGE_ENABLE_LOCAL_ACCESS_LAB=true`.
+3. Configure `VULNFORGE_ACCESS_LAB_FLAGS` as a JSON object with three distinct `VULNFORGE{...}` values under keys `AC-01`, `AC-02`, and `AC-03`. Keep these synthetic development flags private in the ignored `.env`; do not commit them or expose them to the frontend.
+4. Seed without resetting the database or applying a new migration:
+
+   ```powershell
+   npm --prefix backend run seed:access-lab
+   npm run db:status
+   ```
+
+5. Start the backend and frontend, sign in with a local synthetic learner, open `/categories`, then choose Access Control. Run each comparison, start an attempt, reveal hints in order, submit the locally configured flag, review the explanation, submit the quiz, and inspect `/progress`.
+
+The local database was seeded and the seed was rerun to verify idempotency. A real PostgreSQL-backed synthetic learner completed all three AC challenge flows through the local backend: hints/penalties, configured flags, explanations, stored quiz results, progress, and simulator authorization outcomes. Browser checks confirmed Access Control visibility, all three catalogue entries/details, and vulnerable-versus-secure results for each simulator. Unauthenticated simulator access returned 401; attempts to submit client owner/role claims were rejected, and the real learner role remained STUDENT. No secret values were printed. Automated production gating and loopback helper tests passed; a separate production server/non-loopback HTTP request was not launched. Frontend automated tests are not configured. Final checks passed: 77/77 backend tests, backend and frontend builds, Prisma format/validation, all three existing migrations current, and `git diff --check`.
+
+### Local simulator API
+
+Every endpoint requires authentication and loopback network access:
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/access-lab/status` | Reports whether the mounted local simulator is available. |
+| `POST /api/access-lab/object-access` | Accepts a fixed `resourceId` choice and compares vulnerable and owner-checked decisions. |
+| `POST /api/access-lab/role-permission` | Accepts an allowlisted synthetic role/action scenario; it does not accept a client role. |
+| `POST /api/access-lab/privilege-boundary` | Evaluates a fixed synthetic privilege request without changing account state. |
+
 ## Scripts and tests
 
 Run commands from the repository root unless a command uses `npm --prefix`.
@@ -311,6 +356,8 @@ Run commands from the repository root unless a command uses `npm --prefix`.
 | `npm --prefix backend run seed:test-admin` | Idempotently provision the development administrator from the configured password. |
 | `npm --prefix backend run seed` | Add the three AUTH challenges in explicitly enabled development mode using local flag values and the configured verifier keyring. |
 | `npm --prefix backend run seed:auth-lab` | Alias for the local authentication-lab seed. |
+| `npm --prefix backend run seed:access-lab` | Add the three AC challenges in explicitly enabled development mode using private local flags and the configured verifier keyring. |
+| `npm --prefix backend run test` | Run all backend auth, challenge, learning, Module 6, and Module 7 tests. |
 | `docker compose up --build` | Build and start all Compose services. |
 | `docker compose stop postgres` | Stop only the PostgreSQL service and retain its named volume. |
 
@@ -341,6 +388,8 @@ Any intentionally vulnerable educational labs must be isolated from the main pla
 
 The Module 6 exercises are simulations, not sandboxes: they are available only in explicitly enabled development mode and from loopback requests. Do not deploy them publicly or use their synthetic design examples as production authentication code. The simulated reset flow has no email delivery, durable tokens, or real-account effects.
 
+The Module 7 exercises are also local simulations, not sandboxes. Their vulnerable comparisons never call real object, role, or privilege services. Keep the access simulator explicitly disabled outside local development; never treat its insecure decision as production authorization logic.
+
 ## Roadmap
 
 - **Completed Module 1 foundation:** React landing page and PostgreSQL/Prisma setup with the initial User/Role migration.
@@ -349,6 +398,7 @@ The Module 6 exercises are simulations, not sandboxes: they are available only i
 - **Implemented Module 4 — Challenge Engine:** Authenticated catalogue and details, attempt lifecycle, rate-limited server-side HMAC flag verification, unique solve records, and server-calculated points. No vulnerable runtime/container execution is included.
 - **Implemented Module 5 — Hints, Explanations & Learning Checks:** Sequential hint reveals and penalties; post-solve structured explanations; secure multiple-choice quiz submission and stored results; dashboard and progress views. Penalties reduce the solve award and are applied once when the server records the solve. Automated backend tests and production builds pass; browser verification remains a manual check.
 - **Completed Module 6 — Authentication Security Lab:** Three seeded challenge records with HMAC-backed flags, ordered hints, explanations, quizzes, and authenticated learner progress; local-only AUTH-01/02/03 simulations guarded by explicit development configuration and loopback checks. The database-backed learner workflow and local browser simulations were verified. No schema migration was required.
+- **Completed Module 7 — Access Control Security Lab:** Three seeded AC challenge records with HMAC-backed flags, ordered hints, explanations, quizzes, and authenticated learner progress; local-only object ownership, role/permission, and privilege-boundary comparisons use fixed synthetic cases and are guarded by development configuration, session authentication, loopback checks, and rate limits. PostgreSQL-backed learner workflow and browser simulations were verified. No schema migration was required.
 - **Planned:** Challenge runtime environments, challenge-authoring UI, learning pathways, leaderboards, and analytics.
 
 Folders reserved for future work are not evidence that those features are implemented.

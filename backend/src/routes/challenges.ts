@@ -4,19 +4,19 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { env } from '../config/env.js';
-import { AUTH_LAB_CHALLENGE_SLUGS, isAuthLabContentVisible } from '../lib/auth-lab.js';
+import { LOCAL_SECURITY_LAB_CHALLENGE_SLUGS, isAuthLabContentVisible } from '../lib/auth-lab.js';
 import { requireAuth } from '../middleware/auth.js';
 import { persistSubmission, verifySubmittedFlag } from '../lib/challenge-submissions.js';
 
 const router = Router();
-const authLabChallengeSlugs = new Set<string>(AUTH_LAB_CHALLENGE_SLUGS);
+const localSecurityLabChallengeSlugs = new Set<string>(LOCAL_SECURITY_LAB_CHALLENGE_SLUGS);
 
-function canBrowseAuthLab(req: Request): boolean {
+function canBrowseLocalSecurityLabs(req: Request): boolean {
   return isAuthLabContentVisible(env.NODE_ENV, req.socket.remoteAddress);
 }
 
 router.param('slug', (req, res, next, slug) => {
-  if (authLabChallengeSlugs.has(slug) && !canBrowseAuthLab(req)) {
+  if (localSecurityLabChallengeSlugs.has(slug) && !canBrowseLocalSecurityLabs(req)) {
     return res.status(404).json({
       error: 'Not found',
       message: 'The requested challenge does not exist.',
@@ -81,12 +81,12 @@ const submissionIpLimiter = rateLimit({
   message: submissionLimitMessage,
 });
 
-const currentAvailability = (now: Date, includeAuthLab: boolean) => ({
+const currentAvailability = (now: Date, includeLocalLabs: boolean) => ({
   status: 'PUBLISHED' as const,
   AND: [
     { OR: [{ availableFrom: null }, { availableFrom: { lte: now } }] },
     { OR: [{ availableUntil: null }, { availableUntil: { gt: now } }] },
-    ...(!includeAuthLab ? [{ slug: { notIn: [...AUTH_LAB_CHALLENGE_SLUGS] } }] : []),
+    ...(!includeLocalLabs ? [{ slug: { notIn: [...LOCAL_SECURITY_LAB_CHALLENGE_SLUGS] } }] : []),
   ],
 });
 
@@ -121,7 +121,7 @@ function internalError(res: Response) {
 
 router.get('/categories', requireAuth, async (_req, res) => {
   const now = new Date();
-  const availableChallenges = currentAvailability(now, canBrowseAuthLab(_req));
+  const availableChallenges = currentAvailability(now, canBrowseLocalSecurityLabs(_req));
 
   try {
     const categories = await prisma.category.findMany({
@@ -165,7 +165,7 @@ router.get('/challenges', requireAuth, async (req, res) => {
 
   const { category, difficulty, solved, page, limit } = parsed.data;
   const now = new Date();
-  const availableChallenges = currentAvailability(now, canBrowseAuthLab(req));
+  const availableChallenges = currentAvailability(now, canBrowseLocalSecurityLabs(req));
   const where: Prisma.ChallengeWhereInput = {
     ...availableChallenges,
     ...(category ? { category: { slug: category } } : {}),
@@ -233,7 +233,7 @@ router.get('/challenges/:slug', requireAuth, async (req, res) => {
     const challenge = await prisma.challenge.findFirst({
       where: {
         slug: parsedSlug.data,
-        ...currentAvailability(now, canBrowseAuthLab(req)),
+        ...currentAvailability(now, canBrowseLocalSecurityLabs(req)),
       },
       select: {
         id: true,
@@ -611,7 +611,7 @@ router.get('/challenges/:slug/hints', requireAuth, async (req, res) => {
     const challenge = await prisma.challenge.findFirst({
       where: {
         slug: parsedSlug.data,
-        ...currentAvailability(new Date(), canBrowseAuthLab(req)),
+        ...currentAvailability(new Date(), canBrowseLocalSecurityLabs(req)),
       },
       select: { id: true },
     });

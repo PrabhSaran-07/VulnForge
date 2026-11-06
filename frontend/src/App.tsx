@@ -11,11 +11,18 @@
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, apiRequest } from './api';
 import AuthLabSimulator from './components/AuthLabSimulator';
+import AccessControlLabSimulator from './components/AccessControlLabSimulator';
 
 const authLabChallengeSlugs = new Set([
   'auth-01-weak-authentication',
   'auth-02-authentication-check',
   'auth-03-password-reset',
+]);
+
+const accessControlLabChallengeSlugs = new Set([
+  'ac-01-object-level-access-control',
+  'ac-02-role-permission-enforcement',
+  'ac-03-privilege-boundary-failure',
 ]);
 
 type UserRole = 'STUDENT' | 'ADMIN';
@@ -1434,6 +1441,9 @@ function ChallengeDetailPage() {
 
       {import.meta.env.DEV && authLabChallengeSlugs.has(challenge.slug) && (
         <AuthLabSimulator slug={challenge.slug} />
+      )}
+      {import.meta.env.DEV && accessControlLabChallengeSlugs.has(challenge.slug) && (
+        <AccessControlLabSimulator slug={challenge.slug} />
       )}
 
       {error && <p className="form-error" role="alert">{error}</p>}
