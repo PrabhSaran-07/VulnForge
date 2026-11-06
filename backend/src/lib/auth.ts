@@ -7,6 +7,7 @@ export const userSelect = {
   email: true,
   role: true,
   passwordHash: true,
+  isActive: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -16,6 +17,7 @@ export const safeUserFields = {
   username: true,
   email: true,
   role: true,
+  isActive: true,
   createdAt: true,
   updatedAt: true,
 } as const;

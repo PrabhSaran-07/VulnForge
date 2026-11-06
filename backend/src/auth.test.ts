@@ -586,6 +586,9 @@ describe('Authentication API', () => {
 
   test('unauthenticated request to protected endpoint returns 401', async () => {
     await request(app).get('/api/auth/admin-check').expect(401);
+    await request(app).get('/api/admin/overview').expect(401);
+    await request(app).get('/api/leaderboard').expect(401);
+    await request(app).get('/api/learning/analytics').expect(401);
   });
 
   test('STUDENT cannot access ADMIN-only route (returns 403)', async () => {
@@ -604,6 +607,8 @@ describe('Authentication API', () => {
 
     const response = await agent.get('/api/auth/admin-check').expect(403);
     assert.equal(response.body.error, 'Forbidden');
+    await agent.get('/api/admin/overview').expect(403);
+    await agent.get('/api/admin/events').expect(403);
   });
 
   test('admin-check allows an ADMIN account and logout invalidates its session', async () => {
@@ -618,6 +623,7 @@ describe('Authentication API', () => {
       },
       select: { id: true },
     });
+
     createdUserIds.add(admin.id);
 
     const agent = request.agent(app);
@@ -631,11 +637,49 @@ describe('Authentication API', () => {
 
     // ADMIN can access the admin-check endpoint.
     await agent.get('/api/auth/admin-check').expect(200);
+    await agent.get('/api/admin/overview').expect(200);
+    await agent.get('/api/admin/users?limit=1').expect(200);
+    await agent.get('/api/admin/challenges?limit=1').expect(200);
+    await agent.get('/api/admin/submissions?limit=1').expect(200);
+    await agent.get('/api/admin/events?limit=1').expect(200);
+    await agent.get('/api/admin/analytics').expect(200);
 
     // After logout the ADMIN session must be invalidated.
     await agent.post('/api/auth/logout').expect(200);
     await agent.get('/api/auth/me').expect(401);
     await agent.get('/api/auth/admin-check').expect(401);
+  });
+
+  test('disabling a student invalidates access through an already-authenticated session', async () => {
+    const agent = request.agent(app);
+    const adminAgent = request.agent(app);
+    const suffix = fixtureId();
+    const adminPassword = 'DisableAdmin123';
+    const admin = await prisma.user.create({
+      data: {
+        username: `disableadmin${suffix}`,
+        email: `disableadmin${suffix}@example.com`,
+        passwordHash: await hashPassword(adminPassword),
+        role: 'ADMIN',
+      },
+      select: { id: true },
+    });
+    createdUserIds.add(admin.id);
+    const response = await registerUser({
+      username: `disabled${suffix}`,
+      email: `disabled${suffix}@example.com`,
+      password: 'StrongPass123',
+    });
+    await agent
+      .post('/api/auth/login')
+      .send({ identifier: `disabled${suffix}@example.com`, password: 'StrongPass123' })
+      .expect(200);
+    await adminAgent
+      .post('/api/auth/login')
+      .send({ identifier: `disableadmin${suffix}@example.com`, password: adminPassword })
+      .expect(200);
+    await adminAgent.patch(`/api/admin/users/${response.body.user.id}/status`).send({ isActive: false }).expect(200);
+    await agent.get('/api/auth/me').expect(401);
   });
 
   // ── Sensitive field exclusion ─────────────────────────────────────────────────

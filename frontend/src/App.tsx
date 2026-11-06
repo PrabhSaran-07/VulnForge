@@ -12,6 +12,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, use
 import { ApiError, apiRequest } from './api';
 import AuthLabSimulator from './components/AuthLabSimulator';
 import AccessControlLabSimulator from './components/AccessControlLabSimulator';
+import { getPlannedChallengeBySlug, getPlannedModuleBySlug, plannedModules } from './module-placeholders';
 
 const authLabChallengeSlugs = new Set([
   'auth-01-weak-authentication',
@@ -32,6 +33,7 @@ type AuthUser = {
   username: string;
   email: string;
   role: UserRole;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -66,7 +68,6 @@ function useAuth() {
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider.');
   }
-
   return context;
 }
 
@@ -760,6 +761,8 @@ const workspaceLinks = [
   { path: '/challenges', label: 'Challenges', short: 'CH' },
   { path: '/categories', label: 'Categories', short: 'CA' },
   { path: '/progress', label: 'My Progress', short: 'PR' },
+  { path: '/leaderboard', label: 'Leaderboard', short: 'LB' },
+  { path: '/analytics', label: 'Analytics', short: 'AN' },
   { path: '/profile', label: 'Profile', short: 'AC' },
 ];
 
@@ -809,6 +812,25 @@ function WorkspaceLayout({ children }: { children: ReactNode }) {
               <span>{item.label}</span>
             </Link>
           ))}
+          {user?.role === 'ADMIN' && (
+            <>
+              <span className="workspace-nav-heading">ADMINISTRATION</span>
+              {[
+                { path: '/admin', label: 'Admin workspace', short: 'AD' },
+                { path: '/security-events', label: 'Blue-Team events', short: 'EV' },
+              ].map((item) => (
+                <Link
+                  key={item.path}
+                  className={`workspace-nav-link${isWorkspaceLinkActive(item.path) ? ' active' : ''}`}
+                  to={item.path}
+                  aria-current={isWorkspaceLinkActive(item.path) ? 'page' : undefined}
+                >
+                  <span className="workspace-nav-icon" aria-hidden="true">{item.short}</span>
+                  <span>{item.label}</span>
+                </Link>
+              ))}
+            </>
+          )}
         </nav>
         <div className="workspace-sidebar-note">
           <span className="signal-dot" />
@@ -1013,7 +1035,7 @@ function CategoriesPage() {
       <p className="learning-intro">Browse published challenges by security topic.</p>
       {loading && <p role="status">Loading categories...</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      {!loading && !error && categories.length === 0 && (
+      {!loading && !error && categories.length === 0 && plannedModules.length === 0 && (
         <p className="learning-empty">No categories with available challenges were found.</p>
       )}
       {!loading && categories.length > 0 && (
@@ -1030,6 +1052,25 @@ function CategoriesPage() {
           ))}
         </div>
       )}
+      {!loading && (
+        <section className="planned-modules">
+          <SectionCode>[ IN DEVELOPMENT ]</SectionCode>
+          <h2>Coming soon</h2>
+          <div className="challenge-grid">
+            {plannedModules.map((module) => (
+              <article className="learning-card challenge-card planned-card" key={module.slug}>
+                <div className="learning-card-meta"><span>MODULE {module.number}</span><span className="planned-status">COMING SOON</span></div>
+                <h3>{module.name}</h3>
+                <p>{module.description}</p>
+                <p>{module.challenges.length} planned labs</p>
+                <Link className="workspace-text-link" to={`/challenges?category=${encodeURIComponent(module.slug)}`}>
+                  VIEW PLANNED LABS <span aria-hidden="true">→</span>
+                </Link>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </section>
   );
 }
@@ -1037,11 +1078,17 @@ function CategoriesPage() {
 function ChallengeCatalogPage() {
   const [searchParams] = useSearchParams();
   const categorySlug = searchParams.get('category');
+  const plannedModule = getPlannedModuleBySlug(categorySlug);
   const [challenges, setChallenges] = useState<ChallengeListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (getPlannedModuleBySlug(categorySlug)) {
+      setLoading(false);
+      setError('');
+      return;
+    }
     let active = true;
     const query = new URLSearchParams({ limit: '100' });
     if (categorySlug) {
@@ -1078,7 +1125,9 @@ function ChallengeCatalogPage() {
       {loading && <p role="status">Loading available challenges...</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       {!loading && !error && challenges.length === 0 && (
-        <p className="learning-empty">{categorySlug ? 'No published challenges are currently available in this category.' : 'No published challenges are currently available.'}</p>
+        <p className="learning-empty">{plannedModule
+          ? 'These learning modules are planned but not available to start yet.'
+          : categorySlug ? 'No published challenges are currently available in this category.' : 'No published challenges are currently available.'}</p>
       )}
       {!loading && challenges.length > 0 && (
         <div className="challenge-grid">
@@ -1096,6 +1145,40 @@ function ChallengeCatalogPage() {
             </article>
           ))}
         </div>
+      )}
+      {!loading && !error && plannedModule && (
+        <div className="challenge-grid">
+          {plannedModule.challenges.map((challenge) => (
+            <article className="learning-card challenge-card planned-card" key={challenge.slug}>
+              <div className="learning-card-meta"><span>{challenge.code}</span><span className="planned-status">COMING SOON</span></div>
+              <h2>{challenge.title}</h2>
+              <p>{challenge.description}</p>
+              <h3>Learning objectives</h3>
+              <ul>{challenge.objectives.map((objective) => <li key={objective}>{objective}</li>)}</ul>
+              <Link className="workspace-text-link" to={`/challenges/${challenge.slug}`}>
+                VIEW DETAILS <span aria-hidden="true">→</span>
+              </Link>
+            </article>
+          ))}
+        </div>
+      )}
+      {!loading && !categorySlug && (
+        <section className="planned-modules">
+          <SectionCode>[ COMING SOON ]</SectionCode>
+          <h2>Planned security labs</h2>
+          <div className="challenge-grid">
+            {plannedModules.map((module) => (
+              <article className="learning-card challenge-card planned-card" key={module.slug}>
+                <div className="learning-card-meta"><span>MODULE {module.number}</span><span className="planned-status">COMING SOON</span></div>
+                <h3>{module.name}</h3>
+                <p>{module.description}</p>
+                <Link className="workspace-text-link" to={`/challenges?category=${encodeURIComponent(module.slug)}`}>
+                  VIEW PLANNED LABS <span aria-hidden="true">→</span>
+                </Link>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
     </section>
   );
@@ -1167,6 +1250,7 @@ type Explanation = {
 
 function ChallengeDetailPage() {
   const { slug } = useParams();
+  const plannedChallenge = getPlannedChallengeBySlug(slug);
   const [challenge, setChallenge] = useState<ChallengeDetails | null>(null);
   const [hints, setHints] = useState<HintState | null>(null);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
@@ -1216,6 +1300,11 @@ function ChallengeDetailPage() {
   };
 
   useEffect(() => {
+    if (getPlannedChallengeBySlug(slug)) {
+      setLoading(false);
+      setError('');
+      return;
+    }
     if (!slug) {
       setError('A challenge slug is required.');
       setLoading(false);
@@ -1409,6 +1498,21 @@ function ChallengeDetailPage() {
 
   if (loading) {
     return <p role="status">Loading challenge...</p>;
+  }
+  if (plannedChallenge) {
+    return (
+      <section className="learning-page">
+        <Link className="workspace-text-link" to={`/challenges?category=${encodeURIComponent(plannedChallenge.module.slug)}`}>← BACK TO PLANNED LABS</Link>
+        <article className="learning-card">
+          <div className="learning-card-meta"><span>{plannedChallenge.module.name}</span><span className="planned-status">COMING SOON</span></div>
+          <h1>{plannedChallenge.code}: {plannedChallenge.title}</h1>
+          <p>{plannedChallenge.description}</p>
+          <h2>Learning objectives</h2>
+          <ul>{plannedChallenge.objectives.map((objective) => <li key={objective}>{objective}</li>)}</ul>
+          <p className="learning-empty">This lab is not available yet. No challenge attempt or progress can be created.</p>
+        </article>
+      </section>
+    );
   }
   if (error && !challenge) {
     return <section className="learning-page"><p className="form-error" role="alert">{error}</p><Link to="/challenges">Back to challenges</Link></section>;
@@ -1679,6 +1783,364 @@ function ProgressPage() {
   );
 }
 
+type LeaderboardEntry = {
+  rank: number;
+  username: string;
+  points: number;
+  solvedChallenges: number;
+  categoryProgress: Array<{ slug: string; name: string; solved: number; total: number; completed: boolean }>;
+  badges: string[];
+};
+
+function LeaderboardPage() {
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<{ leaderboard: LeaderboardEntry[]; pagination: { totalPages: number } }>(`/api/leaderboard?page=${page}&limit=20`)
+      .then((data) => {
+        if (active) {
+          setEntries(data.leaderboard);
+          setTotalPages(data.pagination.totalPages);
+        }
+      })
+      .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Unable to load leaderboard.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [page]);
+
+  return (
+    <section className="learning-page">
+      <SectionCode>[ GLOBAL STANDINGS ]</SectionCode>
+      <h1>Leaderboard</h1>
+      <p className="learning-intro">Points and solves are calculated from recorded challenge completions. Ties share rank; username order is stable for display.</p>
+      {loading && <p role="status">Loading leaderboard...</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {!loading && !error && entries.length === 0 && <p className="learning-empty">No recorded challenge solves yet.</p>}
+      {entries.map((entry) => (
+        <article className="learning-card leaderboard-row" key={`${entry.rank}-${entry.username}`}>
+          <strong>#{entry.rank}</strong>
+          <div><h2>{entry.username}</h2><p>{entry.solvedChallenges} solved · {entry.points} points</p>
+            {entry.badges.length > 0 && <p className="leaderboard-badges">{entry.badges.map((badge) => badge.replace('category-complete:', 'Completed: ')).join(' · ')}</p>}
+            <p className="learning-muted">{entry.categoryProgress.map((category) => `${category.name} ${category.solved}/${category.total}`).join(' · ') || 'No published categories'}</p>
+          </div>
+        </article>
+      ))}
+      {!loading && totalPages > 1 && <div className="pagination-controls">
+        <button className="button button-secondary" type="button" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Previous</button>
+        <span>Page {page} of {totalPages}</span>
+        <button className="button button-secondary" type="button" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>Next</button>
+      </div>}
+    </section>
+  );
+}
+
+type StudentAnalytics = {
+  challengesStarted: number;
+  challengesSolved: number;
+  hintsRevealed: number;
+  quizAttempts: number;
+  quizAveragePercentage: number | null;
+  categories: Array<{ slug: string; name: string; solved: number; total: number }>;
+};
+
+function AnalyticsPage() {
+  const [analytics, setAnalytics] = useState<StudentAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    apiRequest<StudentAnalytics>('/api/learning/analytics')
+      .then((data) => { if (active) setAnalytics(data); })
+      .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Unable to load analytics.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+  return (
+    <section className="learning-page">
+      <SectionCode>[ LEARNING ANALYTICS ]</SectionCode>
+      <h1>Your learning report</h1>
+      <p className="learning-intro">Metrics are calculated from your recorded attempts, solves, hints and quiz submissions.</p>
+      {loading && <p role="status">Loading your analytics...</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {analytics && (
+        <>
+          <div className="progress-stats">
+            <article className="learning-card"><span>STARTED</span><strong>{analytics.challengesStarted}</strong></article>
+            <article className="learning-card"><span>SOLVED</span><strong>{analytics.challengesSolved}</strong></article>
+            <article className="learning-card"><span>HINTS REVEALED</span><strong>{analytics.hintsRevealed}</strong></article>
+            <article className="learning-card"><span>QUIZ AVERAGE</span><strong>{analytics.quizAveragePercentage === null ? '—' : `${analytics.quizAveragePercentage}%`}</strong></article>
+          </div>
+          <section className="learning-card">
+            <h2>Category coverage</h2>
+            {analytics.categories.length === 0 && <p className="learning-empty">No published categories are available.</p>}
+            {analytics.categories.map((category) => (
+              <p className="progress-row" key={category.slug}><span>{category.name}</span><strong>{category.solved}/{category.total} solved</strong></p>
+            ))}
+          </section>
+        </>
+      )}
+    </section>
+  );
+}
+
+type AdminOverview = {
+  users: number;
+  activeUsers: number;
+  challenges: number;
+  publishedChallenges: number;
+  submissions: number;
+  solves: number;
+  securityEvents24Hours: number;
+};
+type AdminUser = { id: string; username: string; role: UserRole; isActive: boolean; createdAt: string };
+type AdminChallenge = { id: string; slug: string; title: string; description: string; status: string; difficulty: string; points: number; category: { name: string; slug: string } };
+type AdminSubmission = { id: string; result: string; submittedAt: string; user: { username: string }; challenge: { title: string; slug: string } };
+
+function AdminPage() {
+  const { user } = useAuth();
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [challenges, setChallenges] = useState<AdminChallenge[]>([]);
+  const [submissions, setSubmissions] = useState<AdminSubmission[]>([]);
+  const [analytics, setAnalytics] = useState<Array<{ slug: string; title: string; solves: number; attempts: number; hintReveals: number; averageAttemptsPerSolve: number | null }>>([]);
+  const [studentProgress, setStudentProgress] = useState<Array<{ username: string; points: number; solvedChallenges: number }>>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [userPage, setUserPage] = useState(1);
+  const [userTotalPages, setUserTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const loadAdminData = async (search = userSearch, page = userPage) => {
+    setError('');
+    try {
+      const userQuery = new URLSearchParams({ limit: '50', page: String(page) });
+      if (search) userQuery.set('search', search);
+      const [overviewData, userData, challengeData, submissionData, analyticsData] = await Promise.all([
+        apiRequest<AdminOverview>('/api/admin/overview'),
+        apiRequest<{ users: AdminUser[]; pagination: { totalPages: number } }>(`/api/admin/users?${userQuery}`),
+        apiRequest<{ challenges: AdminChallenge[] }>('/api/admin/challenges?limit=50'),
+        apiRequest<{ submissions: AdminSubmission[] }>('/api/admin/submissions?limit=20'),
+        apiRequest<{ challenges: typeof analytics; studentProgress: typeof studentProgress }>('/api/admin/analytics'),
+      ]);
+      setOverview(overviewData);
+      setUsers(userData.users);
+      setUserTotalPages(userData.pagination.totalPages);
+      setChallenges(challengeData.challenges);
+      setSubmissions(submissionData.submissions);
+      setAnalytics(analyticsData.challenges);
+      setStudentProgress(analyticsData.studentProgress);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load admin workspace.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (user?.role === 'ADMIN') {
+      void loadAdminData();
+    }
+  }, [user?.role]);
+
+  const setUserActive = async (target: AdminUser) => {
+    setNotice('');
+    try {
+      await apiRequest(`/api/admin/users/${target.id}/status`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !target.isActive }),
+      });
+      setNotice(`Account ${target.isActive ? 'disabled' : 'enabled'}.`);
+      await loadAdminData();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update account.');
+    }
+  };
+  const setChallengeStatus = async (challenge: AdminChallenge) => {
+    const status = challenge.status === 'PUBLISHED' ? 'ARCHIVED' : 'PUBLISHED';
+    setNotice('');
+    try {
+      await apiRequest(`/api/admin/challenges/${challenge.id}/status`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+      });
+      setNotice(`Challenge ${status.toLowerCase()}.`);
+      await loadAdminData();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update challenge status.');
+    }
+  };
+  const saveChallengeMetadata = async (challenge: AdminChallenge, event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const title = formData.get('title');
+    const description = formData.get('description');
+    if (typeof title !== 'string' || typeof description !== 'string') {
+      setError('Provide a title and description.');
+      return;
+    }
+    setNotice('');
+    try {
+      await apiRequest(`/api/admin/challenges/${challenge.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          description,
+        }),
+      });
+      setNotice(`Metadata saved for ${challenge.slug}.`);
+      await loadAdminData();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to save challenge metadata.');
+    }
+  };
+
+  if (user?.role !== 'ADMIN') {
+    return <section className="learning-page"><p className="form-error" role="alert">This workspace is restricted to administrators.</p></section>;
+  }
+  return (
+    <section className="learning-page">
+      <SectionCode>[ ADMIN WORKSPACE ]</SectionCode><h1>Platform management</h1>
+      {loading && <p role="status">Loading administrative data...</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
+      {overview && <div className="progress-stats">
+        <article className="learning-card"><span>USERS / ACTIVE</span><strong>{overview.users} / {overview.activeUsers}</strong></article>
+        <article className="learning-card"><span>CHALLENGES / PUBLISHED</span><strong>{overview.challenges} / {overview.publishedChallenges}</strong></article>
+        <article className="learning-card"><span>SUBMISSIONS</span><strong>{overview.submissions}</strong></article>
+        <article className="learning-card"><span>SECURITY EVENTS · 24H</span><strong>{overview.securityEvents24Hours}</strong></article>
+      </div>}
+      <section className="learning-card"><h2>User accounts</h2>
+        <form className="admin-search" onSubmit={(event) => { event.preventDefault(); setUserPage(1); void loadAdminData(userSearch, 1); }}>
+          <label>Search username<input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} maxLength={80} /></label>
+          <button className="button button-secondary" type="submit">Search</button>
+        </form>
+        {users.map((target) => <p className="progress-row" key={target.id}><span>{target.username} · {target.role} · {target.isActive ? 'Active' : 'Disabled'}</span>
+          {target.role === 'STUDENT' && <button className="button button-secondary" type="button" onClick={() => void setUserActive(target)}>{target.isActive ? 'Disable' : 'Enable'}</button>}</p>)}
+        {userTotalPages > 1 && <div className="pagination-controls">
+          <button className="button button-secondary" type="button" disabled={userPage <= 1} onClick={() => { const page = userPage - 1; setUserPage(page); void loadAdminData(userSearch, page); }}>Previous</button>
+          <span>Page {userPage} of {userTotalPages}</span>
+          <button className="button button-secondary" type="button" disabled={userPage >= userTotalPages} onClick={() => { const page = userPage + 1; setUserPage(page); void loadAdminData(userSearch, page); }}>Next</button>
+        </div>}
+      </section>
+      <section className="learning-card"><h2>Challenge publication</h2>
+        {challenges.map((challenge) => <div className="admin-challenge-row" key={challenge.id}>
+          <p className="progress-row"><span>{challenge.title} · {challenge.category.name} · {challenge.status}</span>
+            <button className="button button-secondary" type="button" onClick={() => void setChallengeStatus(challenge)}>{challenge.status === 'PUBLISHED' ? 'Archive' : 'Publish'}</button></p>
+          <details><summary>Edit challenge metadata</summary>
+            <form className="admin-metadata-form" onSubmit={(event) => void saveChallengeMetadata(challenge, event)}>
+              <label>Title<input name="title" defaultValue={challenge.title} maxLength={200} required /></label>
+              <label>Description<textarea name="description" defaultValue={challenge.description} maxLength={10_000} required /></label>
+              <button className="button button-secondary" type="submit">Save metadata</button>
+            </form>
+          </details>
+        </div>)}
+      </section>
+      <section className="learning-card"><h2>Challenge performance</h2>
+        {analytics.map((challenge) => <p className="progress-row" key={challenge.slug}><span>{challenge.title}</span><span>{challenge.solves} solves · {challenge.attempts} attempts · {challenge.hintReveals} hints · {challenge.averageAttemptsPerSolve ?? '—'} avg attempts/solve</span></p>)}
+      </section>
+      <section className="learning-card"><h2>Student progress summaries</h2>
+        {studentProgress.length === 0 && <p className="learning-empty">No active learners have recorded solves.</p>}
+        {studentProgress.map((student) => <p className="progress-row" key={student.username}><span>{student.username}</span><span>{student.points} points · {student.solvedChallenges} solves</span></p>)}
+      </section>
+      <section className="learning-card"><h2>Recent flag submissions</h2>
+        {submissions.map((submission) => <p className="progress-row" key={submission.id}><span>{submission.user.username} · {submission.challenge.title} · {submission.result}</span><span>{new Date(submission.submittedAt).toLocaleString()}</span></p>)}
+      </section>
+      <Link className="workspace-text-link" to="/security-events">OPEN BLUE-TEAM EVENT DASHBOARD →</Link>
+    </section>
+  );
+}
+
+type SecurityEventRecord = {
+  id: string;
+  eventType: string;
+  severity: string;
+  requestId: string;
+  metadata: Record<string, string | number | boolean | null> | null;
+  occurredAt: string;
+  actor: { username: string } | null;
+  target: { username: string } | null;
+};
+type SecurityDetection = { eventType: string; severity: string; count: number };
+
+function SecurityEventsPage() {
+  const { user } = useAuth();
+  const [events, setEvents] = useState<SecurityEventRecord[]>([]);
+  const [detections, setDetections] = useState<SecurityDetection[]>([]);
+  const [countsBySeverity, setCountsBySeverity] = useState<Array<{ severity: string; count: number }>>([]);
+  const [eventType, setEventType] = useState('');
+  const [severity, setSeverity] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(false);
+
+  const loadEvents = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    setLoading(true);
+    setError('');
+    const query = new URLSearchParams({ limit: '50' });
+    if (eventType) query.set('eventType', eventType);
+    if (severity) query.set('severity', severity);
+    if (fromDate) query.set('from', new Date(`${fromDate}T00:00:00.000Z`).toISOString());
+    if (toDate) query.set('to', new Date(`${toDate}T23:59:59.999Z`).toISOString());
+    try {
+      const data = await apiRequest<{
+        events: SecurityEventRecord[];
+        detections: SecurityDetection[];
+        countsBySeverity: Array<{ severity: string; count: number }>;
+      }>(`/api/admin/events?${query}`);
+      setEvents(data.events);
+      setDetections(data.detections);
+      setCountsBySeverity(data.countsBySeverity);
+      setLoaded(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load security events.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { if (user?.role === 'ADMIN') void loadEvents(); }, [user?.role]);
+
+  if (user?.role !== 'ADMIN') {
+    return <section className="learning-page"><p className="form-error" role="alert">Security events are restricted to administrators.</p></section>;
+  }
+  return (
+    <section className="learning-page">
+      <SectionCode>[ BLUE-TEAM VIEW ]</SectionCode><h1>Security events</h1>
+      <p className="learning-intro">Events omit passwords, cookies, tokens, flags, and request bodies. Records older than 90 days are automatically purged.</p>
+      <form className="learning-card event-filters" onSubmit={(event) => void loadEvents(event)}>
+        <label>Event type<input value={eventType} onChange={(event) => setEventType(event.target.value)} maxLength={80} /></label>
+        <label>Severity<select value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="">All</option>{['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
+        <label>To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
+        <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Loading...' : 'Apply filters'}</button>
+      </form>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {loading && !loaded && <p role="status">Loading recent security events...</p>}
+      {loaded && <section className="progress-stats" aria-label="Security event counts">
+        {countsBySeverity.map((count) => <article className={`learning-card severity-${count.severity.toLowerCase()}`} key={count.severity}><span>{count.severity}</span><strong>{count.count}</strong></article>)}
+      </section>}
+      {detections.length > 0 && <section className="learning-card" aria-label="Detection signals">
+        <h2>Detection signals · last 15 minutes</h2>
+        {detections.map((detection) => <p className={`severity-${detection.severity.toLowerCase()}`} key={detection.eventType}>{detection.eventType.replaceAll('_', ' ')} · {detection.count} events · {detection.severity}</p>)}
+      </section>}
+      {!loading && loaded && events.length === 0 && <p className="learning-empty">No security events match these filters.</p>}
+      {events.map((item) => <article className={`learning-card security-event severity-${item.severity.toLowerCase()}`} key={item.id}>
+        <div className="learning-card-meta"><strong>{item.eventType.replaceAll('_', ' ')}</strong><span>{item.severity}</span></div>
+        <p>{new Date(item.occurredAt).toLocaleString()} · {item.actor?.username ?? 'System'}{item.target ? ` → ${item.target.username}` : ''}</p>
+        <small>Request {item.requestId}</small>
+        {item.metadata && <pre>{JSON.stringify(item.metadata)}</pre>}
+      </article>)}
+    </section>
+  );
+}
+
 function WorkspacePage() {
   const location = useLocation();
   let content: ReactNode;
@@ -1695,6 +2157,18 @@ function WorkspacePage() {
       break;
     case '/progress':
       content = <ProgressPage />;
+      break;
+    case '/leaderboard':
+      content = <LeaderboardPage />;
+      break;
+    case '/analytics':
+      content = <AnalyticsPage />;
+      break;
+    case '/admin':
+      content = <AdminPage />;
+      break;
+    case '/security-events':
+      content = <SecurityEventsPage />;
       break;
     default:
       content = location.pathname.startsWith('/challenges/')
@@ -1717,6 +2191,10 @@ export default function App() {
         <Route path="/challenges/:slug" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/categories" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/progress" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/leaderboard" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/analytics" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/admin" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/security-events" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

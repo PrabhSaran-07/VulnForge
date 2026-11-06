@@ -1,9 +1,16 @@
 import type { NextFunction, Request, Response } from 'express';
 import prisma from '../lib/prisma.js';
 import { safeUser, userSelect } from '../lib/auth.js';
+import { recordSecurityEvent } from '../lib/security-events.js';
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.userId) {
+    void recordSecurityEvent({
+      eventType: 'access_denied',
+      severity: 'LOW',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      metadata: { route: req.path, method: req.method, reason: 'missing_session' },
+    });
     return res.status(401).json({
       error: 'Unauthorized',
       message: 'Authentication required.',
@@ -16,7 +23,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       select: userSelect,
     });
 
-    if (!user) {
+    if (!user || user.isActive === false) {
+      void recordSecurityEvent({
+        eventType: 'access_denied',
+        severity: 'MEDIUM',
+        requestId: String(res.locals.requestId ?? 'unknown'),
+        ...(user ? { actorUserId: user.id } : {}),
+        metadata: { route: req.path, method: req.method, reason: user ? 'disabled_account' : 'unknown_account' },
+      });
       req.session.destroy(() => undefined);
       return res.status(401).json({
         error: 'Unauthorized',
@@ -44,6 +58,13 @@ export function requireRole(roles: Array<'STUDENT' | 'ADMIN'>) {
     }
 
     if (!roles.includes(req.user.role)) {
+      void recordSecurityEvent({
+        eventType: 'access_denied',
+        severity: 'MEDIUM',
+        requestId: String(res.locals.requestId ?? 'unknown'),
+        actorUserId: req.user.id,
+        metadata: { route: req.path, method: req.method },
+      });
       return res.status(403).json({
         error: 'Forbidden',
         message: 'You do not have permission to access this resource.',

@@ -7,6 +7,7 @@ import { env } from '../config/env.js';
 import { LOCAL_SECURITY_LAB_CHALLENGE_SLUGS, isAuthLabContentVisible } from '../lib/auth-lab.js';
 import { requireAuth } from '../middleware/auth.js';
 import { persistSubmission, verifySubmittedFlag } from '../lib/challenge-submissions.js';
+import { recordSecurityEvent } from '../lib/security-events.js';
 
 const router = Router();
 const localSecurityLabChallengeSlugs = new Set<string>(LOCAL_SECURITY_LAB_CHALLENGE_SLUGS);
@@ -70,6 +71,16 @@ const submissionUserLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: submissionLimitMessage,
+  handler: (req, res) => {
+    void recordSecurityEvent({
+      eventType: 'rate_limit_exceeded',
+      severity: 'HIGH',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      actorUserId: req.user!.id,
+      metadata: { route: '/challenges/:slug/submissions', method: req.method },
+    });
+    res.status(429).json(submissionLimitMessage);
+  },
 });
 
 const submissionIpLimiter = rateLimit({
@@ -79,6 +90,16 @@ const submissionIpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: submissionLimitMessage,
+  handler: (req, res) => {
+    void recordSecurityEvent({
+      eventType: 'rate_limit_exceeded',
+      severity: 'HIGH',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      actorUserId: req.user!.id,
+      metadata: { route: '/challenges/:slug/submissions', method: req.method },
+    });
+    res.status(429).json(submissionLimitMessage);
+  },
 });
 
 const currentAvailability = (now: Date, includeLocalLabs: boolean) => ({
@@ -372,6 +393,15 @@ router.post('/challenges/:slug/attempts', requireAuth, async (req, res) => {
       });
     }
 
+    if (result.kind === 'created') {
+      void recordSecurityEvent({
+        eventType: 'challenge_started',
+        severity: 'INFO',
+        requestId: String(res.locals.requestId ?? 'unknown'),
+        actorUserId: req.user!.id,
+        metadata: { challengeSlug: parsedSlug.data },
+      });
+    }
     return res.status(result.kind === 'created' ? 201 : 200).json({
       attempt: result.attempt,
     });
@@ -452,6 +482,15 @@ router.post('/challenges/:slug/attempts/:attemptId/stop', requireAuth, async (re
       });
     }
 
+    if (result.kind === 'stopped') {
+      void recordSecurityEvent({
+        eventType: 'challenge_stopped',
+        severity: 'INFO',
+        requestId: String(res.locals.requestId ?? 'unknown'),
+        actorUserId: req.user!.id,
+        metadata: { challengeSlug: parsedSlug.data },
+      });
+    }
     return res.status(200).json({ attempt: result.attempt });
   } catch {
     return internalError(res);
@@ -584,12 +623,35 @@ router.post(
         });
       }
       if (!result.correct) {
+        void recordSecurityEvent({
+          eventType: 'flag_submission',
+          severity: 'MEDIUM',
+          requestId: String(res.locals.requestId ?? 'unknown'),
+          actorUserId: req.user!.id,
+          metadata: { challengeSlug: parsedSlug.data, outcome: 'incorrect' },
+        });
         return res.status(200).json({
           correct: false,
           message: 'Incorrect flag.',
         });
       }
 
+      void recordSecurityEvent({
+        eventType: 'flag_submission',
+        severity: 'INFO',
+        requestId: String(res.locals.requestId ?? 'unknown'),
+        actorUserId: req.user!.id,
+        metadata: { challengeSlug: parsedSlug.data, outcome: 'correct' },
+      });
+      if (!result.alreadySolved) {
+        void recordSecurityEvent({
+          eventType: 'challenge_solved',
+          severity: 'INFO',
+          requestId: String(res.locals.requestId ?? 'unknown'),
+          actorUserId: req.user!.id,
+          metadata: { challengeSlug: parsedSlug.data, pointsAwarded: result.pointsAwarded },
+        });
+      }
       return res.status(200).json({
         correct: true,
         pointsAwarded: result.pointsAwarded,

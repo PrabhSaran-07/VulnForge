@@ -4,7 +4,7 @@
 
 VULNFORGE is an educational cybersecurity platform that helps learners investigate published challenges, submit flags, track progress, and study remediation guidance.
 
-The current repository provides the landing page, authentication, protected student workspace, the Module 4 challenge and flag-submission engine, Module 5 learning features, and local-only Module 6 authentication and Module 7 access-control simulations. Challenge runtime execution and challenge-authoring UI are not implemented.
+The current repository provides the landing page, authentication, protected student workspace, the Module 4 challenge and flag-submission engine, Module 5 learning features, and local-only Module 6 authentication and Module 7 access-control simulations. Modules 8–12 are frontend-only Coming Soon entries. Modules 13–15 and 17 have a local data-backed foundation; Module 16 is a disabled runtime contract only. No vulnerable container execution or public deployment is provided.
 
 ## Contents
 
@@ -18,6 +18,7 @@ The current repository provides the landing page, authentication, protected stud
 - [Authentication and test accounts](#authentication-and-test-accounts)
 - [Module 6 authentication security lab](#module-6-authentication-security-lab)
 - [Module 7 access control security lab](#module-7-access-control-security-lab)
+- [Modules 8–19 status](#modules-8-19-status)
 - [Scripts and tests](#scripts-and-tests)
 - [Troubleshooting](#troubleshooting)
 - [Security notes](#security-notes)
@@ -45,13 +46,18 @@ The current repository provides the landing page, authentication, protected stud
 - Module 6 AUTH-01, AUTH-02, and AUTH-03 content authored through the existing challenge, secret, hint, explanation, and quiz models; no new database models or migrations.
 - Authenticated local simulation endpoints for weak authentication, flawed authentication checks, and reset-token lifecycle concepts. They use synthetic data, require explicit local enablement and a loopback connection, and are not mounted in production.
 - Module 7 AC-01, AC-02, and AC-03 content and simulations use the same challenge, HMAC-secret, hint, explanation, and quiz infrastructure; no new database models or migrations.
+- Modules 8–12 appear as frontend-only planned labs and never create challenge records, scores, attempts, or flags.
+- Modules 13–14 add structured security-event records, role-protected administration APIs, student-account activation controls, and challenge publication controls.
+- Module 15 calculates a paginated leaderboard from server-side solve records with stable tie ranks and derived badges.
+- Module 17 adds student learning metrics and administrator challenge/event analytics based on stored records.
+- Module 16 defines an owner-aware, resource-limited lifecycle contract with runtime execution explicitly disabled.
 - Focused backend authentication, challenge, schema, and learning API tests using Node's test runner and Supertest.
 
 Authentication uses server-managed sessions. Passwords are hashed with bcryptjs before storage. Registration always creates a `STUDENT`; an administrator can only be provisioned through trusted backend code.
 
-### Not implemented yet
+### Remaining limitations
 
-The repository does not provide isolated challenge runtime environments, challenge-authoring or administration UI, leaderboards, or learning pathways. Learning content is stored in the database and must be authored through trusted database/seed tooling; no public authoring API is provided. Landing-page sections and messaging about future capabilities do not mean those capabilities are implemented.
+The repository does not provide an isolated challenge runtime executor, challenge-authoring API/UI, real container lifecycle, learning pathways, deployment, or a full audit/compliance pipeline. Learning content is authored through trusted database/seed tooling; no public authoring API is provided. Landing-page sections and messaging about future capabilities do not mean those capabilities are implemented.
 
 ## Technology stack
 
@@ -338,6 +344,71 @@ Every endpoint requires authentication and loopback network access:
 | `POST /api/access-lab/role-permission` | Accepts an allowlisted synthetic role/action scenario; it does not accept a client role. |
 | `POST /api/access-lab/privilege-boundary` | Evaluates a fixed synthetic privilege request without changing account state. |
 
+## Modules 8–19 status
+
+### Modules 8–12 — frontend-only Coming Soon
+
+The Categories and Challenges pages list Injection, Session & Token, File Upload, API, and Configuration Security modules and their planned challenge cards. Each card and detail page is explicitly marked **COMING SOON** and cannot start an attempt. These entries are static frontend metadata only: no challenge, flag, score, or progress rows are created for them.
+
+| Module | Planned challenges |
+| --- | --- |
+| 8 — Injection Security | INJ-01 through INJ-03 |
+| 9 — Session & Token Security | SESSION-01 through SESSION-03 |
+| 10 — File Upload Security | UPLOAD-01 through UPLOAD-03 |
+| 11 — API Security | API-01 through API-05 |
+| 12 — Configuration Security | CONFIG-01 through CONFIG-04 |
+
+### Module 13 — logging and detection
+
+The API assigns each request an `X-Request-Id`. Security-relevant events are persisted as structured records with timestamps, severity, optional actor/target references, request IDs, and intentionally small metadata fields. Current events include authentication outcomes, protected-route denials, rate limiting, challenge starts/stops, flag outcomes/solves, admin changes, and startup security-configuration state. No passwords, cookies, session identifiers, tokens, flags, request bodies, or HMAC material are recorded by these call sites.
+
+`GET /api/admin/events` is administrator-only and supports `eventType`, `severity`, `from`, `to`, `page`, and `limit`. It includes severity counts and simple 15-minute aggregate detection signals for repeated login failures, denied access, incorrect flags, and rate limits. The server purges events older than 90 days on startup and daily. Database-backed event storage requires applying the additive migration before starting the updated backend. Event persistence failures are reported as structured server logs; they do not turn an otherwise successful learner operation into a failure.
+
+### Module 14 — administration
+
+All `/api/admin/*` routes use `requireAuth` and `requireRole(['ADMIN'])`; frontend visibility is not an authorization control. Current APIs:
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/admin/overview` | Counts users, active users, challenges, submissions, solves, and 24-hour events. |
+| `GET /api/admin/users` | Safe user fields, username search, and pagination. |
+| `PATCH /api/admin/users/:id/status` | Enables/disables student accounts; roles and admin accounts cannot be changed here. Disabled sessions are rejected server-side. |
+| `GET /api/admin/challenges` | Paginated challenge list; private secrets are excluded. |
+| `PATCH /api/admin/challenges/:id` | Validated title/description/difficulty/points/objective edits; points cannot change after a solve exists. |
+| `PATCH /api/admin/challenges/:id/status` | Publishes or archives a challenge. |
+| `GET /api/admin/submissions` | Recent flag outcome metadata; submitted flags are never stored or returned. |
+| `GET /api/admin/analytics` | Challenge performance, event trends, and aggregate student progress. |
+
+These are management primitives, not a complete content-authoring or category-management interface. No user deletion, score editing, role escalation, or Docker operation is exposed.
+
+### Module 15 — leaderboard
+
+`GET /api/leaderboard?page=1&limit=20` derives points and solve counts from `ChallengeSolve` only. Equal point/solve totals share a competition rank; username and user ID provide deterministic display order. Only active student usernames are public. First-solve and category-completion badges are derived from recorded solves and currently published challenges; no client-supplied points or duplicate reward path exists.
+
+### Module 16 — isolation status
+
+`backend/src/lib/challenge-lifecycle.ts` defines fixed resource limits, disabled runtime allowlisting, owner checks, and start/stop/expiry/failure state transitions. The runtime entry remains disabled, and no container is created, no Docker socket is used, and no network endpoint starts a challenge target. This is a safe foundation, **not verified isolation or a runnable sandbox**. A future executor must be separately deployed, private-network-only, non-privileged, egress-restricted, resource-limited, and tested for cross-user isolation before any vulnerable target is run.
+
+### Module 17 — analytics
+
+`GET /api/learning/analytics` returns the signed-in learner's started/solved challenge counts, hint reveals, quiz average, and category coverage. Individual analytics are not available to other students. Administrator challenge summaries use stored attempt/solve/hint data and omit passwords and secrets. Quiz average is the arithmetic mean of each recorded quiz score percentage; challenge averages are stored attempt count divided by unique solve count, and are null when there are no solves.
+
+### Module 18 — security validation
+
+Backend regression coverage runs through the existing Node test runner. The lifecycle policy has focused unit tests for allowlisting, ownership, state transitions, and expiry. The test suite also checks student denial on administrator APIs. This coverage does not substitute for database-backed migration checks, deployment threat modeling, or sandbox isolation testing.
+
+### Module 19 — architecture and local demo
+
+**Core data relationships:** `User` owns attempts, submissions, solves, hint usages, quiz attempts, and optional security-event actor/target references. `Category` contains `Challenge`; each challenge may have one private `ChallengeSecret`, ordered hints, an explanation, quiz questions/options, attempts, submissions, solves, and quiz attempts. `ChallengeQuizResponse` points to its quiz attempt, question, and selected option. `SecurityEvent` is append-oriented, indexed by time/type/severity, and retains nullable user references with `SET NULL`.
+
+**Learner data flow:** browser → authenticated API/session middleware → input validation → challenge/learning service → Prisma/PostgreSQL → safe response projection. Flag verification uses the private server-side HMAC keyring; the browser receives neither flags nor verifier material.
+
+**Admin workflow:** authenticated request → current database-backed user lookup → server-side ADMIN role middleware → validated management operation → security-event audit record. User role changes and destructive deletion are not part of this workspace.
+
+**Demo path:** Landing → Register → Login → Dashboard → Challenge catalogue → complete an existing local AUTH/AC challenge → submit its locally configured flag → review points and explanation → submit quiz → inspect Progress and Leaderboard → sign in with a separately provisioned admin and review Admin workspace/Security events. Modules 8–12 remain Coming Soon; no public vulnerable target should be demonstrated.
+
+For deployment, require TLS, a production database and session secret, a migration rollout, centralized log/alert operations, shared rate-limit storage for multiple backend instances, trusted proxy configuration, and a separately verified private sandbox executor before running any vulnerable target. No deployment or isolated runtime verification is claimed.
+
 ## Scripts and tests
 
 Run commands from the repository root unless a command uses `npm --prefix`.
@@ -378,7 +449,7 @@ The authentication suite checks registration, input validation, duplicate and co
 
 ## Security notes
 
-Current controls include bcrypt password hashing (12 rounds), validation of registration/login data, rate limits on registration and login, HTTP-only session cookies, credentialed CORS restricted to a configured origin, security headers via Helmet, and server-side authentication and role middleware. Public registration explicitly creates only `STUDENT` accounts. The test-admin script is a trusted development-only provisioning mechanism.
+Current controls include bcrypt password hashing (12 rounds), validation of registration/login data, rate limits on registration and login, HTTP-only session cookies, credentialed CORS restricted to a configured origin, security headers via Helmet, and server-side authentication and role middleware. Public registration explicitly creates only `STUDENT` accounts. The test-admin script is a trusted development-only provisioning mechanism. Administrator APIs are gated server-side and expose only projected user/challenge/submission fields; student disabling does not modify roles and immediately invalidates subsequent authenticated requests.
 
 The Compose PostgreSQL credentials are development defaults, not production credentials. Outside automated tests, sessions are stored in PostgreSQL using the same `DATABASE_URL` as the application. `connect-pg-simple` creates the session table when missing and periodically removes expired sessions; session rows use the session cookie expiration, which is eight hours. Automated HTTP tests use Express's in-memory store. The session cookie is HTTP-only, same-site `lax`, and secure in production. Registration is limited to 10 requests per 15 minutes per client and login to 20 requests per 15 minutes; test mode uses a higher allowance for the suite. Before deployment, configure a strong secret, production database credentials, HTTPS, and appropriate operational controls. The existing middleware and headers do not by themselves establish that the whole application is production-hardened.
 
@@ -390,6 +461,8 @@ The Module 6 exercises are simulations, not sandboxes: they are available only i
 
 The Module 7 exercises are also local simulations, not sandboxes. Their vulnerable comparisons never call real object, role, or privilege services. Keep the access simulator explicitly disabled outside local development; never treat its insecure decision as production authorization logic.
 
+Security-event metadata is restricted to approved operational fields and excludes request bodies and secret material. Event records are visible only through administrator middleware and are deleted after 90 days. The local lifecycle contract is intentionally disabled and is not evidence that vulnerable workloads are isolated.
+
 ## Roadmap
 
 - **Completed Module 1 foundation:** React landing page and PostgreSQL/Prisma setup with the initial User/Role migration.
@@ -399,7 +472,10 @@ The Module 7 exercises are also local simulations, not sandboxes. Their vulnerab
 - **Implemented Module 5 — Hints, Explanations & Learning Checks:** Sequential hint reveals and penalties; post-solve structured explanations; secure multiple-choice quiz submission and stored results; dashboard and progress views. Penalties reduce the solve award and are applied once when the server records the solve. Automated backend tests and production builds pass; browser verification remains a manual check.
 - **Completed Module 6 — Authentication Security Lab:** Three seeded challenge records with HMAC-backed flags, ordered hints, explanations, quizzes, and authenticated learner progress; local-only AUTH-01/02/03 simulations guarded by explicit development configuration and loopback checks. The database-backed learner workflow and local browser simulations were verified. No schema migration was required.
 - **Completed Module 7 — Access Control Security Lab:** Three seeded AC challenge records with HMAC-backed flags, ordered hints, explanations, quizzes, and authenticated learner progress; local-only object ownership, role/permission, and privilege-boundary comparisons use fixed synthetic cases and are guarded by development configuration, session authentication, loopback checks, and rate limits. PostgreSQL-backed learner workflow and browser simulations were verified. No schema migration was required.
-- **Planned:** Challenge runtime environments, challenge-authoring UI, learning pathways, leaderboards, and analytics.
+- **Added local foundations for Modules 13–15 and 17:** security events and basic aggregate detections, server-guarded admin controls, solve-derived leaderboard, and learning/admin metrics. Automated and browser verification for these additions must be completed before treating them as production-ready.
+- **Module 16 foundation only:** disabled runtime policy and ownership/state-transition helpers; no executor, sandbox, or isolation verification.
+- **Coming Soon placeholders:** Modules 8–12 appear in the frontend only. Their challenge content and lab execution are not implemented.
+- **Still unimplemented:** isolated challenge runtime execution, challenge-authoring API/UI, learning pathways, deployment, and a full audit/compliance pipeline.
 
 Folders reserved for future work are not evidence that those features are implemented.
 

@@ -1,0 +1,385 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
+import prisma from '../lib/prisma.js';
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { recordSecurityEvent } from '../lib/security-events.js';
+
+const router = Router();
+const pageSchema = z.object({
+  page: z.coerce.number().int().min(1).max(100_000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().trim().max(80).optional(),
+}).strict();
+const statusSchema = z.object({ status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']) }).strict();
+const userStatusSchema = z.object({ isActive: z.boolean() }).strict();
+const challengeMetadataSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().min(1).max(10_000).optional(),
+  difficulty: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED', 'EXPERT']).optional(),
+  points: z.number().int().min(1).max(100_000).optional(),
+  learningObjectives: z.array(z.string().trim().min(1).max(300)).max(30).optional(),
+}).strict().refine((value) => Object.keys(value).length > 0);
+const eventQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(100_000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  eventType: z.string().trim().min(1).max(80).optional(),
+  severity: z.enum(['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+}).strict();
+
+function countAll(value: unknown): number {
+  return typeof value === 'object'
+    && value !== null
+    && '_all' in value
+    && typeof value._all === 'number'
+    ? value._all
+    : 0;
+}
+
+router.use(requireAuth, requireRole(['ADMIN']));
+
+router.get('/overview', async (_req, res) => {
+  try {
+    const [users, activeUsers, challenges, publishedChallenges, submissions, solves, events] = await prisma.$transaction([
+      prisma.user.count(),
+      prisma.user.count({ where: { isActive: true } }),
+      prisma.challenge.count(),
+      prisma.challenge.count({ where: { status: 'PUBLISHED' } }),
+      prisma.flagSubmission.count(),
+      prisma.challengeSolve.count(),
+      prisma.securityEvent.count({ where: { occurredAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } } }),
+    ]);
+    return res.json({ users, activeUsers, challenges, publishedChallenges, submissions, solves, securityEvents24Hours: events });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to load the admin overview.' });
+  }
+});
+
+router.get('/users', async (req, res) => {
+  const parsed = pageSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide valid pagination and search values.' });
+  }
+  const { page, limit, search } = parsed.data;
+  const where: Prisma.UserWhereInput = {
+    ...(search ? { username: { contains: search, mode: 'insensitive' } } : {}),
+  };
+  try {
+    const [users, total] = await prisma.$transaction([
+      prisma.user.findMany({
+        where,
+        select: { id: true, username: true, role: true, isActive: true, createdAt: true },
+        orderBy: [{ username: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.user.count({ where }),
+    ]);
+    return res.json({ users, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to list users.' });
+  }
+});
+
+router.patch('/users/:id/status', async (req, res) => {
+  const parsed = userStatusSchema.safeParse(req.body);
+  if (!parsed.success || !z.string().uuid().safeParse(req.params.id).success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide a valid user ID and active state.' });
+  }
+  try {
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, role: true, isActive: true },
+    });
+    if (!target) {
+      return res.status(404).json({ error: 'Not found', message: 'User does not exist.' });
+    }
+    if (target.role !== 'STUDENT' || target.id === req.user!.id) {
+      return res.status(400).json({ error: 'Invalid operation', message: 'Only student accounts may be enabled or disabled.' });
+    }
+    const user = await prisma.user.update({
+      where: { id: target.id },
+      data: { isActive: parsed.data.isActive },
+      select: { id: true, username: true, role: true, isActive: true },
+    });
+    await recordSecurityEvent({
+      eventType: 'admin_user_status_changed',
+      severity: 'HIGH',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      actorUserId: req.user!.id,
+      targetUserId: target.id,
+      metadata: { isActive: user.isActive },
+    });
+    return res.json({ user });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to update the account state.' });
+  }
+});
+
+router.get('/challenges', async (req, res) => {
+  const parsed = pageSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide valid pagination and search values.' });
+  }
+  const { page, limit, search } = parsed.data;
+  const where: Prisma.ChallengeWhereInput = search
+    ? { OR: [{ slug: { contains: search, mode: 'insensitive' } }, { title: { contains: search, mode: 'insensitive' } }] }
+    : {};
+  try {
+    const [challenges, total] = await prisma.$transaction([
+      prisma.challenge.findMany({
+        where,
+        select: {
+          id: true, slug: true, title: true, description: true, status: true, difficulty: true, points: true,
+          category: { select: { name: true, slug: true } },
+        },
+        orderBy: [{ title: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.challenge.count({ where }),
+    ]);
+    return res.json({ challenges, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to list challenges.' });
+  }
+});
+
+router.patch('/challenges/:id', async (req, res) => {
+  const parsed = challengeMetadataSchema.safeParse(req.body);
+  if (!parsed.success || !z.string().uuid().safeParse(req.params.id).success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide valid challenge metadata.' });
+  }
+  try {
+    const challenge = await prisma.challenge.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, slug: true, points: true },
+    });
+    if (!challenge) {
+      return res.status(404).json({ error: 'Not found', message: 'Challenge does not exist.' });
+    }
+    if (parsed.data.points !== undefined && parsed.data.points !== challenge.points) {
+      const solves = await prisma.challengeSolve.count({ where: { challengeId: challenge.id } });
+      if (solves > 0) {
+        return res.status(409).json({ error: 'Conflict', message: 'Point values cannot change after the challenge has recorded solves.' });
+      }
+    }
+    const updated = await prisma.challenge.update({
+      where: { id: challenge.id },
+      data: parsed.data,
+      select: {
+        id: true, slug: true, title: true, description: true, difficulty: true, points: true,
+        learningObjectives: true, status: true,
+      },
+    });
+    await recordSecurityEvent({
+      eventType: 'admin_challenge_metadata_changed',
+      severity: 'HIGH',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      actorUserId: req.user!.id,
+      metadata: { challengeSlug: challenge.slug, fields: Object.keys(parsed.data).sort().join(',') },
+    });
+    return res.json({ challenge: updated });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to update challenge metadata.' });
+  }
+});
+
+router.patch('/challenges/:id/status', async (req, res) => {
+  const parsed = statusSchema.safeParse(req.body);
+  if (!parsed.success || !z.string().uuid().safeParse(req.params.id).success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide a valid challenge ID and publication status.' });
+  }
+  try {
+    const current = await prisma.challenge.findUnique({
+      where: { id: req.params.id },
+      select: { slug: true, secret: { select: { challengeId: true } } },
+    });
+    if (!current) {
+      return res.status(404).json({ error: 'Not found', message: 'Challenge does not exist.' });
+    }
+    if (parsed.data.status === 'PUBLISHED' && !current.secret) {
+      return res.status(409).json({ error: 'Conflict', message: 'A challenge must have a private verifier before publication.' });
+    }
+    const challenge = await prisma.challenge.update({
+      where: { id: req.params.id },
+      data: { status: parsed.data.status },
+      select: { id: true, slug: true, title: true, status: true },
+    });
+    await recordSecurityEvent({
+      eventType: 'admin_challenge_status_changed',
+      severity: 'HIGH',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      actorUserId: req.user!.id,
+      metadata: { challengeSlug: challenge.slug, status: challenge.status },
+    });
+    return res.json({ challenge });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+      return res.status(404).json({ error: 'Not found', message: 'Challenge does not exist.' });
+    }
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to update the challenge.' });
+  }
+});
+
+router.get('/submissions', async (req, res) => {
+  const parsed = pageSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide valid pagination values.' });
+  }
+  const { page, limit } = parsed.data;
+  try {
+    const [submissions, total] = await prisma.$transaction([
+      prisma.flagSubmission.findMany({
+        select: {
+          id: true, result: true, submittedAt: true,
+          user: { select: { id: true, username: true } },
+          challenge: { select: { slug: true, title: true } },
+        },
+        orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.flagSubmission.count(),
+    ]);
+    return res.json({ submissions, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to list submissions.' });
+  }
+});
+
+router.get('/events', async (req, res) => {
+  const parsed = eventQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide valid event filters and pagination.' });
+  }
+  const { page, limit, eventType, severity, from, to } = parsed.data;
+  const where: Prisma.SecurityEventWhereInput = {
+    ...(eventType ? { eventType } : {}),
+    ...(severity ? { severity } : {}),
+    occurredAt: {
+      ...(from ? { gte: new Date(from) } : {}),
+      ...(to ? { lte: new Date(to) } : {}),
+      ...(from || to ? {} : { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) }),
+    },
+  };
+  try {
+    const detectionWindow = new Date(Date.now() - 15 * 60 * 1000);
+    const [events, total, failedLogins, deniedRequests, incorrectFlags, limitedRequests, severityCounts] = await prisma.$transaction([
+      prisma.securityEvent.findMany({
+        where,
+        select: {
+          id: true, eventType: true, severity: true, requestId: true, metadata: true, occurredAt: true,
+          actor: { select: { username: true } },
+          target: { select: { username: true } },
+        },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.securityEvent.count({ where }),
+      prisma.securityEvent.count({ where: { eventType: 'authentication_failure', occurredAt: { gte: detectionWindow } } }),
+      prisma.securityEvent.count({ where: { eventType: 'access_denied', occurredAt: { gte: detectionWindow } } }),
+      prisma.securityEvent.count({
+        where: {
+          eventType: 'flag_submission',
+          occurredAt: { gte: detectionWindow },
+          metadata: { path: ['outcome'], equals: 'incorrect' },
+        },
+      }),
+      prisma.securityEvent.count({ where: { eventType: 'rate_limit_exceeded', occurredAt: { gte: detectionWindow } } }),
+      prisma.securityEvent.groupBy({ by: ['severity'], where, orderBy: { severity: 'asc' }, _count: { _all: true } }),
+    ]);
+    const detections = [
+      ...(failedLogins >= 5 ? [{ eventType: 'repeated_authentication_failure', severity: 'HIGH', count: failedLogins }] : []),
+      ...(deniedRequests >= 10 ? [{ eventType: 'repeated_access_denied', severity: 'MEDIUM', count: deniedRequests }] : []),
+      ...(incorrectFlags >= 10 ? [{ eventType: 'repeated_incorrect_flag_submission', severity: 'HIGH', count: incorrectFlags }] : []),
+      ...(limitedRequests >= 3 ? [{ eventType: 'repeated_rate_limit', severity: 'HIGH', count: limitedRequests }] : []),
+    ];
+    return res.json({
+      events,
+      detections,
+      countsBySeverity: severityCounts.map(({ severity: eventSeverity, _count }) => ({ severity: eventSeverity, count: countAll(_count) })),
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to load security events.' });
+  }
+});
+
+router.get('/analytics', async (_req, res) => {
+  try {
+    const [users, challenges, hints, events, byChallenge, studentSolves, recentEvents] = await prisma.$transaction([
+      prisma.user.count({ where: { role: 'STUDENT', isActive: true } }),
+      prisma.challenge.count({ where: { status: 'PUBLISHED' } }),
+      prisma.challengeHintUsage.count(),
+      prisma.securityEvent.groupBy({ by: ['eventType'], orderBy: { eventType: 'asc' }, _count: { _all: true } }),
+      prisma.challenge.findMany({
+        where: { status: 'PUBLISHED' },
+        select: {
+          slug: true, title: true,
+          _count: { select: { solves: true, attempts: true, hintUsages: true } },
+        },
+        orderBy: { title: 'asc' },
+      }),
+      prisma.challengeSolve.groupBy({
+        by: ['userId'],
+        orderBy: { userId: 'asc' },
+        _sum: { pointsAwarded: true },
+        _count: { _all: true },
+      }),
+      prisma.securityEvent.findMany({
+        where: { occurredAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
+        select: { eventType: true, occurredAt: true },
+      }),
+    ]);
+    const challengeMetrics = byChallenge.map((challenge) => ({
+      slug: challenge.slug,
+      title: challenge.title,
+      solves: challenge._count.solves,
+      attempts: challenge._count.attempts,
+      hintReveals: challenge._count.hintUsages,
+      averageAttemptsPerSolve: challenge._count.solves
+        ? Number((challenge._count.attempts / challenge._count.solves).toFixed(2))
+        : null,
+    }));
+    const studentUsers = await prisma.user.findMany({
+      where: { id: { in: studentSolves.map((student) => student.userId) }, role: 'STUDENT', isActive: true },
+      select: { id: true, username: true },
+    });
+    const studentNames = new Map(studentUsers.map((student) => [student.id, student.username]));
+    const trendBuckets = new Map<string, number>();
+    for (const event of recentEvents) {
+      const day = event.occurredAt.toISOString().slice(0, 10);
+      trendBuckets.set(`${day}:${event.eventType}`, (trendBuckets.get(`${day}:${event.eventType}`) ?? 0) + 1);
+    }
+    return res.json({
+      activeStudents: users,
+      publishedChallenges: challenges,
+      hintReveals: hints,
+      eventCounts: events.map(({ eventType, _count }) => ({ eventType, count: countAll(_count) })),
+      eventTrends: [...trendBuckets.entries()].map(([key, count]) => {
+        const [date, eventType] = key.split(':');
+        return { date, eventType, count };
+      }).sort((a, b) => a.date.localeCompare(b.date) || a.eventType.localeCompare(b.eventType)),
+      challenges: challengeMetrics,
+      mostSolvedChallenges: [...challengeMetrics].sort((a, b) => b.solves - a.solves || a.slug.localeCompare(b.slug)).slice(0, 10),
+      leastSolvedChallenges: [...challengeMetrics].sort((a, b) => a.solves - b.solves || a.slug.localeCompare(b.slug)).slice(0, 10),
+      studentProgress: studentSolves
+        .filter((student) => studentNames.has(student.userId))
+        .map((student) => ({
+          username: studentNames.get(student.userId),
+          points: student._sum?.pointsAwarded ?? 0,
+          solvedChallenges: countAll(student._count),
+        }))
+        .sort((a, b) => b.points - a.points || a.username!.localeCompare(b.username!))
+        .slice(0, 20),
+    });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to load analytics.' });
+  }
+});
+
+export default router;

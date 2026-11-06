@@ -2066,11 +2066,145 @@ pre {
   background: rgb(12 15 21 / 95%);
 }
 
+.planned-modules {
+  margin-top: 30px;
+}
+
+.planned-modules h2 {
+  margin: 8px 0 18px;
+}
+
+.planned-card {
+  border-style: dashed;
+}
+
+.planned-status {
+  display: inline-flex;
+  padding: 4px 7px;
+  border: 1px solid rgb(255 107 44 / 40%);
+  border-radius: 3px;
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: .08em;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: start;
+  margin-top: 12px;
+}
+
+.leaderboard-row > strong {
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 20px;
+}
+
+.leaderboard-row h2 {
+  margin: 0;
+}
+
+.leaderboard-row p {
+  margin: 6px 0;
+}
+
+.leaderboard-badges {
+  color: var(--amber);
+}
+
+.event-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-items: end;
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.admin-search {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.admin-search label {
+  display: grid;
+  flex: 1;
+  gap: 7px;
+}
+
+.admin-challenge-row + .admin-challenge-row {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.admin-challenge-row details {
+  margin-top: 10px;
+  color: var(--ivory-muted);
+}
+
+.admin-challenge-row summary {
+  cursor: pointer;
+  color: var(--amber);
+}
+
+.admin-metadata-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.admin-metadata-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.admin-metadata-form textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.event-filters label {
+  display: grid;
+  gap: 7px;
+}
+
+.security-event {
+  margin-top: 12px;
+}
+
+.security-event pre {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--ivory-muted);
+}
+
+.severity-high,
+.severity-critical {
+  border-color: rgb(255 95 95 / 55%);
+}
+
 .workspace-mobile-nav {
   display: none;
 }
 
 @media (max-width: 900px) {
+  .admin-search {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .workspace-shell {
     grid-template-columns: 200px minmax(0, 1fr);
   }
