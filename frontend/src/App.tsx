@@ -8,7 +8,7 @@
   useRef,
   useState,
 } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, apiRequest } from './api';
 
 type UserRole = 'STUDENT' | 'ADMIN';
@@ -755,6 +755,8 @@ function WorkspaceLayout({ children }: { children: ReactNode }) {
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const location = useLocation();
+  const isWorkspaceLinkActive = (path: string) => location.pathname === path
+    || (path === '/challenges' && location.pathname.startsWith('/challenges/'));
 
   const handleLogout = async () => {
     if (isLoggingOut) {
@@ -785,9 +787,9 @@ function WorkspaceLayout({ children }: { children: ReactNode }) {
           {workspaceLinks.map((item) => (
             <Link
               key={item.path}
-              className={`workspace-nav-link${location.pathname === item.path ? ' active' : ''}`}
+              className={`workspace-nav-link${isWorkspaceLinkActive(item.path) ? ' active' : ''}`}
               to={item.path}
-              aria-current={location.pathname === item.path ? 'page' : undefined}
+              aria-current={isWorkspaceLinkActive(item.path) ? 'page' : undefined}
             >
               <span className="workspace-nav-icon" aria-hidden="true">{item.short}</span>
               <span>{item.label}</span>
@@ -824,9 +826,9 @@ function WorkspaceLayout({ children }: { children: ReactNode }) {
         {workspaceLinks.map((item) => (
           <Link
             key={item.path}
-            className={`workspace-mobile-link${location.pathname === item.path ? ' active' : ''}`}
+            className={`workspace-mobile-link${isWorkspaceLinkActive(item.path) ? ' active' : ''}`}
             to={item.path}
-            aria-current={location.pathname === item.path ? 'page' : undefined}
+            aria-current={isWorkspaceLinkActive(item.path) ? 'page' : undefined}
           >
             <span aria-hidden="true">{item.short}</span>
             <small>{item.label}</small>
@@ -839,25 +841,45 @@ function WorkspaceLayout({ children }: { children: ReactNode }) {
 
 function DashboardPage() {
   const { user } = useAuth();
+  const [progress, setProgress] = useState<LearningProgress | null>(null);
+  const [progressError, setProgressError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<LearningProgress>('/api/learning/progress')
+      .then((data) => {
+        if (active) {
+          setProgress(data);
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setProgressError(requestError instanceof Error ? requestError.message : 'Unable to load your progress.');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <>
       <section className="workspace-welcome">
         <SectionCode>[ STUDENT DASHBOARD ]</SectionCode>
         <h1>Welcome, {user?.username}</h1>
-        <p>Your learning workspace is ready. Explore planned learning areas below; activity and progress tracking are not available yet.</p>
+        <p>Investigate published challenges, then strengthen your understanding with explanations and knowledge checks.</p>
         <div className="workspace-quick-links">
           <Link className="button button-primary" to="/challenges">EXPLORE CHALLENGES <span aria-hidden="true">→</span></Link>
-          <Link className="button button-secondary" to="/categories">BROWSE CATEGORIES</Link>
+          <Link className="button button-secondary" to="/progress">VIEW MY PROGRESS</Link>
         </div>
       </section>
 
       <section className="workspace-stats" aria-label="Learning summary">
         {[
-          ['POINTS', 'Not available', 'Points are not tracked yet'],
-          ['CHALLENGES SOLVED', 'Not available', 'Challenge solving is planned for Module 4'],
-          ['CHALLENGES ATTEMPTED', 'Not available', 'Challenge attempts are planned for Module 4'],
-          ['OVERALL PROGRESS', 'Not available', 'Progress tracking planned'],
+          ['POINTS', progress?.points ?? '—', 'Awarded after hint penalties'],
+          ['CHALLENGES SOLVED', progress?.solvedChallenges ?? '—', 'Unique solved challenges'],
+          ['CHALLENGES ATTEMPTED', progress?.attemptedChallenges ?? '—', 'Unique challenges attempted'],
+          ['HINTS REVEALED', progress?.hintsRevealed ?? '—', 'Hints used across challenges'],
         ].map(([label, value, note]) => (
           <article className="workspace-stat-card" key={label}>
             <span className="workspace-stat-label">{label}</span>
@@ -866,16 +888,17 @@ function DashboardPage() {
           </article>
         ))}
       </section>
+      {progressError && <p className="form-error" role="alert">{progressError}</p>}
 
       <section className="workspace-panel workspace-next">
         <div>
           <SectionCode>[ NEXT STEP ]</SectionCode>
-          <h2>Explore the learning areas</h2>
-          <p>Explore planned challenges and security learning categories. Challenge solving and progress tracking are not available yet.</p>
+          <h2>Turn a solve into understanding</h2>
+          <p>After solving a challenge, review its root cause, secure implementation, remediation guidance, detection ideas, and knowledge check.</p>
         </div>
         <div className="workspace-next-links">
           <Link className="workspace-text-link" to="/challenges">VIEW CHALLENGES <span aria-hidden="true">→</span></Link>
-          <Link className="workspace-text-link" to="/categories">VIEW CATEGORIES <span aria-hidden="true">→</span></Link>
+          <Link className="workspace-text-link" to="/progress">VIEW PROGRESS <span aria-hidden="true">→</span></Link>
         </div>
       </section>
     </>
@@ -949,6 +972,647 @@ function ProfilePage() {
   );
 }
 
+type ChallengeListItem = {
+  id: string;
+  slug: string;
+  title: string;
+  category: { name: string };
+  difficulty: string;
+  points: number;
+  solved: boolean;
+};
+
+function ChallengeCatalogPage() {
+  const [challenges, setChallenges] = useState<ChallengeListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<{ challenges: ChallengeListItem[] }>('/api/challenges?limit=100')
+      .then((data) => {
+        if (active) {
+          setChallenges(data.challenges);
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setError(requestError instanceof Error ? requestError.message : 'Unable to load challenges.');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section className="learning-page">
+      <SectionCode>[ CHALLENGE CATALOGUE ]</SectionCode>
+      <h1>Challenges</h1>
+      <p className="learning-intro">Practice in controlled challenges, then review the defensive lessons and knowledge check.</p>
+      {loading && <p role="status">Loading available challenges...</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {!loading && !error && challenges.length === 0 && (
+        <p className="learning-empty">No published challenges are currently available.</p>
+      )}
+      {!loading && challenges.length > 0 && (
+        <div className="challenge-grid">
+          {challenges.map((challenge) => (
+            <article className="learning-card challenge-card" key={challenge.id}>
+              <div className="learning-card-meta">
+                <span>{challenge.category.name}</span>
+                <span>{challenge.difficulty}</span>
+              </div>
+              <h2>{challenge.title}</h2>
+              <p>{challenge.points} points · {challenge.solved ? 'Solved' : 'Not solved'}</p>
+              <Link className="workspace-text-link" to={`/challenges/${challenge.slug}`}>
+                OPEN CHALLENGE <span aria-hidden="true">→</span>
+              </Link>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+type ChallengeDetails = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  learningObjectives: string[];
+  context: string | null;
+  prerequisites: string[];
+  difficulty: string;
+  points: number;
+  solved: boolean;
+  category: { name: string };
+};
+
+type HintState = {
+  hints: Array<{
+    order: number;
+    content: string;
+    penaltyPoints: number;
+    revealedAt: string;
+  }>;
+  nextHint: { order: number; penaltyPoints: number } | null;
+  totalPenaltyPoints: number;
+};
+
+type QuizQuestion = {
+  id: string;
+  order: number;
+  prompt: string;
+  options: Array<{ id: string; text: string }>;
+};
+
+type QuizReview = {
+  id: string;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  submittedAt: string;
+  responses: Array<{
+    question: {
+      id: string;
+      prompt: string;
+      options: Array<{
+        id: string;
+        text: string;
+        isCorrect: boolean;
+        explanation: string | null;
+      }>;
+    };
+    selectedOptionId: string;
+    isCorrect: boolean;
+  }>;
+};
+
+type Explanation = {
+  rootCause: string;
+  technicalExplanation: string;
+  impact: string;
+  conditions: string;
+  secureImplementation: string;
+  remediationGuidance: string;
+  detectionIdeas: string;
+};
+
+function ChallengeDetailPage() {
+  const { slug } = useParams();
+  const [challenge, setChallenge] = useState<ChallengeDetails | null>(null);
+  const [hints, setHints] = useState<HintState | null>(null);
+  const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
+  const [quizHistory, setQuizHistory] = useState<QuizReview[]>([]);
+  const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [flag, setFlag] = useState('');
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [learningLoading, setLearningLoading] = useState(false);
+  const [requestPending, setRequestPending] = useState(false);
+  const [error, setError] = useState('');
+  const [learningError, setLearningError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [pendingHintOrder, setPendingHintOrder] = useState<number | null>(null);
+
+  const loadHints = async () => {
+    if (!slug) {
+      return;
+    }
+
+    const data = await apiRequest<HintState>(`/api/challenges/${encodeURIComponent(slug)}/hints`);
+    setHints(data);
+  };
+
+  const loadLearning = async () => {
+    if (!slug) {
+      return;
+    }
+
+    setLearningLoading(true);
+    setLearningError('');
+    try {
+      const [explanationData, quizData, resultsData] = await Promise.all([
+        apiRequest<{ explanation: Explanation | null }>(`/api/challenges/${encodeURIComponent(slug)}/explanation`),
+        apiRequest<{ questions: QuizQuestion[] }>(`/api/challenges/${encodeURIComponent(slug)}/quiz`),
+        apiRequest<{ attempts: QuizReview[] }>(`/api/challenges/${encodeURIComponent(slug)}/quiz/results`),
+      ]);
+      setExplanation(explanationData.explanation);
+      setQuizQuestions(quizData.questions);
+      setQuizHistory(resultsData.attempts);
+    } catch (requestError) {
+      setLearningError(requestError instanceof Error ? requestError.message : 'Unable to load learning content.');
+    } finally {
+      setLearningLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!slug) {
+      setError('A challenge slug is required.');
+      setLoading(false);
+      return;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError('');
+    Promise.all([
+      apiRequest<{ challenge: ChallengeDetails }>(`/api/challenges/${encodeURIComponent(slug)}`),
+      apiRequest<HintState>(`/api/challenges/${encodeURIComponent(slug)}/hints`),
+    ])
+      .then(async ([challengeData, hintData]) => {
+        if (!active) {
+          return;
+        }
+        setChallenge(challengeData.challenge);
+        setHints(hintData);
+        if (challengeData.challenge.solved) {
+          await loadLearning();
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setError(requestError instanceof Error ? requestError.message : 'Unable to load this challenge.');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [slug]);
+
+  const startOrResumeAttempt = async () => {
+    if (!slug) {
+      return;
+    }
+    setRequestPending(true);
+    setError('');
+    try {
+      const data = await apiRequest<{ attempt: { id: string } }>(
+        `/api/challenges/${encodeURIComponent(slug)}/attempts`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      );
+      setAttemptId(data.attempt.id);
+      setNotice('Your active attempt is ready.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to start the challenge.');
+    } finally {
+      setRequestPending(false);
+    }
+  };
+
+  const stopAttempt = async () => {
+    if (!slug || !attemptId) {
+      return;
+    }
+    setRequestPending(true);
+    setError('');
+    try {
+      await apiRequest(`/api/challenges/${encodeURIComponent(slug)}/attempts/${attemptId}/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      setAttemptId(null);
+      setNotice('The attempt has been stopped.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to stop this attempt.');
+    } finally {
+      setRequestPending(false);
+    }
+  };
+
+  const revealHint = async (order: number, confirmPenalty = false) => {
+    if (!slug) {
+      return;
+    }
+    setRequestPending(true);
+    setError('');
+    try {
+      await apiRequest(`/api/challenges/${encodeURIComponent(slug)}/hints`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order, ...(confirmPenalty ? { confirmPenalty: true } : {}) }),
+      });
+      setPendingHintOrder(null);
+      await loadHints();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to reveal this hint.');
+    } finally {
+      setRequestPending(false);
+    }
+  };
+
+  const submitFlag = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!slug || !attemptId) {
+      return;
+    }
+
+    setRequestPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const data = await apiRequest<{
+        correct: boolean;
+        message?: string;
+        pointsAwarded?: number;
+        alreadySolved?: boolean;
+      }>(`/api/challenges/${encodeURIComponent(slug)}/attempts/${attemptId}/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flag }),
+      });
+      if (data.correct) {
+        setChallenge((current) => current ? { ...current, solved: true } : current);
+        setAttemptId(null);
+        setFlag('');
+        setNotice(data.alreadySolved
+          ? 'Challenge already solved. No additional points were awarded.'
+          : `Challenge solved. ${data.pointsAwarded ?? 0} points awarded after hint penalties.`);
+        await loadLearning();
+      } else {
+        setNotice(data.message ?? 'Incorrect flag.');
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to submit the flag.');
+    } finally {
+      setRequestPending(false);
+    }
+  };
+
+  const submitQuiz = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!slug) {
+      return;
+    }
+    if (quizQuestions.some((question) => !answers[question.id])) {
+      setLearningError('Choose an answer for each question before submitting.');
+      return;
+    }
+
+    setRequestPending(true);
+    setLearningError('');
+    try {
+      const data = await apiRequest<{
+        attempt: Omit<QuizReview, 'responses'>;
+        responses: Array<{
+          questionId: string;
+          prompt: string;
+          selectedOptionId: string;
+          isCorrect: boolean;
+          options: QuizReview['responses'][number]['question']['options'];
+        }>;
+      }>(`/api/challenges/${encodeURIComponent(slug)}/quiz/attempts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          answers: quizQuestions.map((question) => ({
+            questionId: question.id,
+            optionId: answers[question.id],
+          })),
+        }),
+      });
+      const review: QuizReview = {
+        ...data.attempt,
+        responses: data.responses.map((response) => ({
+          question: {
+            id: response.questionId,
+            prompt: response.prompt,
+            options: response.options,
+          },
+          selectedOptionId: response.selectedOptionId,
+          isCorrect: response.isCorrect,
+        })),
+      };
+      setQuizHistory((current) => [review, ...current]);
+    } catch (requestError) {
+      setLearningError(requestError instanceof Error ? requestError.message : 'Unable to submit the knowledge check.');
+    } finally {
+      setRequestPending(false);
+    }
+  };
+
+  if (loading) {
+    return <p role="status">Loading challenge...</p>;
+  }
+  if (error && !challenge) {
+    return <section className="learning-page"><p className="form-error" role="alert">{error}</p><Link to="/challenges">Back to challenges</Link></section>;
+  }
+  if (!challenge) {
+    return null;
+  }
+
+  return (
+    <section className="learning-page">
+      <Link className="workspace-text-link" to="/challenges">← BACK TO CHALLENGES</Link>
+      <header className="challenge-heading learning-card">
+        <div className="learning-card-meta"><span>{challenge.category.name}</span><span>{challenge.difficulty}</span></div>
+        <h1>{challenge.title}</h1>
+        <p>{challenge.description}</p>
+        <p className="challenge-points">{challenge.points} challenge points</p>
+      </header>
+
+      <section className="learning-card">
+        <SectionCode>[ BEFORE YOU BEGIN ]</SectionCode>
+        <h2>Learning objectives</h2>
+        {challenge.learningObjectives.length
+          ? <ul>{challenge.learningObjectives.map((objective) => <li key={objective}>{objective}</li>)}</ul>
+          : <p className="learning-empty">No learning objectives have been added.</p>}
+        {challenge.context && <><h3>Context</h3><p>{challenge.context}</p></>}
+        {challenge.prerequisites.length > 0 && (
+          <><h3>Prerequisites</h3><ul>{challenge.prerequisites.map((item) => <li key={item}>{item}</li>)}</ul></>
+        )}
+      </section>
+
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {notice && <p className="learning-notice" role="status">{notice}</p>}
+
+      {!challenge.solved && (
+        <>
+          <section className="learning-card challenge-attempt">
+            <SectionCode>[ DURING THE CHALLENGE ]</SectionCode>
+            <h2>Flag submission</h2>
+            <p>Start or resume an attempt to submit your flag. Your score is checked and recorded by the server.</p>
+            {!attemptId ? (
+              <button className="button button-primary" type="button" onClick={() => void startOrResumeAttempt()} disabled={requestPending}>
+                {requestPending ? 'Starting...' : 'Start or resume attempt'}
+              </button>
+            ) : (
+              <>
+                <form className="learning-form" onSubmit={(event) => void submitFlag(event)}>
+                  <label htmlFor="challenge-flag">Flag</label>
+                  <input id="challenge-flag" name="flag" value={flag} onChange={(event) => setFlag(event.target.value)} maxLength={256} required />
+                  <button className="button button-primary" type="submit" disabled={requestPending || !flag}>
+                    {requestPending ? 'Submitting...' : 'Submit flag'}
+                  </button>
+                </form>
+                <button className="button button-secondary" type="button" onClick={() => void stopAttempt()} disabled={requestPending}>Stop attempt</button>
+              </>
+            )}
+          </section>
+
+          <section className="learning-card">
+            <SectionCode>[ ORDERED HINTS ]</SectionCode>
+            <h2>Reveal hints in sequence</h2>
+            <p>Hint penalties reduce the server-awarded challenge points when you solve; each hint is charged at most once.</p>
+            {hints?.hints.map((hint) => (
+              <article className="revealed-hint" key={hint.order}>
+                <h3>Hint {hint.order}{hint.penaltyPoints > 0 ? ` · ${hint.penaltyPoints} point penalty` : ''}</h3>
+                <p>{hint.content}</p>
+              </article>
+            ))}
+            {hints?.nextHint && (
+              <div className="hint-controls">
+                {pendingHintOrder === hints.nextHint.order ? (
+                  <div className="hint-confirmation" role="alert">
+                    <p>Revealing Hint {hints.nextHint.order} will reduce your challenge award by {hints.nextHint.penaltyPoints} points. Continue?</p>
+                    <button className="button button-primary" type="button" disabled={requestPending} onClick={() => void revealHint(hints.nextHint!.order, true)}>Confirm and reveal</button>
+                    <button className="button button-secondary" type="button" onClick={() => setPendingHintOrder(null)}>Cancel</button>
+                  </div>
+                ) : (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={requestPending || !attemptId}
+                    onClick={() => hints.nextHint!.penaltyPoints > 0
+                      ? setPendingHintOrder(hints.nextHint!.order)
+                      : void revealHint(hints.nextHint!.order)}
+                  >
+                    {hints.nextHint.penaltyPoints > 0
+                      ? `Review ${hints.nextHint.penaltyPoints}-point penalty for next hint`
+                      : `Reveal hint ${hints.nextHint.order}`}
+                  </button>
+                )}
+              </div>
+            )}
+            {hints?.nextHint === null && hints?.hints.length === 0 && <p className="learning-empty">No hints are configured for this challenge.</p>}
+            {hints && hints.totalPenaltyPoints > 0 && <p className="learning-muted">Penalty currently recorded: {hints.totalPenaltyPoints} points, deducted from the solve award.</p>}
+          </section>
+        </>
+      )}
+
+      {challenge.solved && (
+        <section className="learning-card">
+          <SectionCode>[ AFTER SOLVING ]</SectionCode>
+          <h2>Challenge explanation</h2>
+          {learningLoading && <p role="status">Loading explanation and knowledge check...</p>}
+          {learningError && <p className="form-error" role="alert">{learningError}</p>}
+          {!learningLoading && explanation && (
+            <div className="explanation-grid">
+              <article><h3>Root cause</h3><p>{explanation.rootCause}</p></article>
+              <article><h3>Technical explanation</h3><p>{explanation.technicalExplanation}</p></article>
+              <article><h3>Impact</h3><p>{explanation.impact}</p></article>
+              <article><h3>Conditions</h3><p>{explanation.conditions}</p></article>
+              <article><h3>Secure implementation</h3><p>{explanation.secureImplementation}</p></article>
+              <article><h3>Remediation guidance</h3><p>{explanation.remediationGuidance}</p></article>
+              <article><h3>Detection ideas</h3><p>{explanation.detectionIdeas}</p></article>
+            </div>
+          )}
+          {!learningLoading && !explanation && <p className="learning-empty">No explanation has been added for this challenge yet.</p>}
+
+          <div className="quiz-section">
+            <h2>Knowledge check</h2>
+            {quizQuestions.length === 0 && <p className="learning-empty">No quiz questions are configured for this challenge.</p>}
+            {quizQuestions.length > 0 && (
+              <form className="quiz-form" onSubmit={(event) => void submitQuiz(event)}>
+                {quizQuestions.map((question) => (
+                  <fieldset className="quiz-question" key={question.id}>
+                    <legend>{question.order}. {question.prompt}</legend>
+                    {question.options.map((option) => (
+                      <label className="quiz-option" key={option.id}>
+                        <input
+                          type="radio"
+                          name={`question-${question.id}`}
+                          value={option.id}
+                          checked={answers[question.id] === option.id}
+                          onChange={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))}
+                        />
+                        <span>{option.text}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                ))}
+                <button className="button button-primary" type="submit" disabled={requestPending}>
+                  {requestPending ? 'Scoring...' : 'Submit knowledge check'}
+                </button>
+              </form>
+            )}
+
+            {quizHistory.length > 0 && (
+              <div className="quiz-results">
+                <h3>Your quiz results</h3>
+                {quizHistory.map((result) => (
+                  <article className="quiz-result" key={result.id}>
+                    <p><strong>{result.score}/{result.totalQuestions} correct · {result.percentage}%</strong> · {new Date(result.submittedAt).toLocaleString()}</p>
+                    {result.responses.map((response) => (
+                      <div className="quiz-feedback" key={response.question.id}>
+                        <h4>{response.question.prompt}</h4>
+                        <p>{response.isCorrect ? 'Correct' : 'Not quite'}</p>
+                        {response.question.options.map((option) => (
+                          <p className="quiz-answer-feedback" key={option.id}>
+                            <strong>{option.isCorrect ? 'Correct answer' : option.id === response.selectedOptionId ? 'Your answer' : 'Option'}:</strong> {option.text}
+                            {option.explanation && <> — {option.explanation}</>}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </section>
+  );
+}
+
+type LearningProgress = {
+  points: number;
+  solvedChallenges: number;
+  attemptedChallenges: number;
+  hintsRevealed: number;
+  solved: Array<{
+    pointsAwarded: number;
+    solvedAt: string;
+    challenge: { slug: string; title: string; points: number };
+  }>;
+  recentQuizAttempts: Array<{
+    id: string;
+    score: number;
+    totalQuestions: number;
+    percentage: number;
+    submittedAt: string;
+    challenge: { slug: string; title: string };
+  }>;
+};
+
+function ProgressPage() {
+  const [progress, setProgress] = useState<LearningProgress | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    apiRequest<LearningProgress>('/api/learning/progress')
+      .then((data) => {
+        if (active) {
+          setProgress(data);
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setError(requestError instanceof Error ? requestError.message : 'Unable to load learning progress.');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section className="learning-page">
+      <SectionCode>[ LEARNING PROGRESS ]</SectionCode>
+      <h1>My progress</h1>
+      {loading && <p role="status">Loading your learning progress...</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {progress && (
+        <>
+          <div className="progress-stats">
+            <article className="learning-card"><span>POINTS EARNED</span><strong>{progress.points}</strong></article>
+            <article className="learning-card"><span>CHALLENGES SOLVED</span><strong>{progress.solvedChallenges}</strong></article>
+            <article className="learning-card"><span>CHALLENGES ATTEMPTED</span><strong>{progress.attemptedChallenges}</strong></article>
+            <article className="learning-card"><span>HINTS REVEALED</span><strong>{progress.hintsRevealed}</strong></article>
+          </div>
+          <section className="learning-card">
+            <h2>Solved challenges</h2>
+            {progress.solved.length === 0
+              ? <p className="learning-empty">Solve a challenge to see it here.</p>
+              : progress.solved.map((solve) => (
+                <p className="progress-row" key={solve.challenge.slug}>
+                  <Link to={`/challenges/${solve.challenge.slug}`}>{solve.challenge.title}</Link>
+                  <span>{solve.pointsAwarded}/{solve.challenge.points} points · {new Date(solve.solvedAt).toLocaleDateString()}</span>
+                </p>
+              ))}
+          </section>
+          <section className="learning-card">
+            <h2>Recent knowledge checks</h2>
+            {progress.recentQuizAttempts.length === 0
+              ? <p className="learning-empty">Complete a knowledge check to see your results here.</p>
+              : progress.recentQuizAttempts.map((attempt) => (
+                <p className="progress-row" key={attempt.id}>
+                  <Link to={`/challenges/${attempt.challenge.slug}`}>{attempt.challenge.title}</Link>
+                  <span>{attempt.score}/{attempt.totalQuestions} · {attempt.percentage}% · {new Date(attempt.submittedAt).toLocaleDateString()}</span>
+                </p>
+              ))}
+          </section>
+        </>
+      )}
+    </section>
+  );
+}
+
 function WorkspacePage() {
   const location = useLocation();
   let content: ReactNode;
@@ -958,16 +1622,18 @@ function WorkspacePage() {
       content = <DashboardPage />;
       break;
     case '/challenges':
-      content = <WorkspacePlaceholder section="Challenges" />;
+      content = <ChallengeCatalogPage />;
       break;
     case '/categories':
       content = <WorkspacePlaceholder section="Categories" />;
       break;
     case '/progress':
-      content = <WorkspacePlaceholder section="My Progress" />;
+      content = <ProgressPage />;
       break;
     default:
-      content = <ProfilePage />;
+      content = location.pathname.startsWith('/challenges/')
+        ? <ChallengeDetailPage />
+        : <ProfilePage />;
   }
 
   return <WorkspaceLayout>{content}</WorkspaceLayout>;
@@ -982,6 +1648,7 @@ export default function App() {
         <Route path="/register" element={<AuthPage mode="register" />} />
         <Route path="/dashboard" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/challenges" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/challenges/:slug" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/categories" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/progress" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />

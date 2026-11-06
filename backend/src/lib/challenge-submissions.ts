@@ -117,13 +117,25 @@ export async function persistSubmission(
     select: { id: true },
   });
   const alreadySolved = existingSolve !== null;
+  let pointsAwarded = 0;
 
   if (!alreadySolved) {
+    const hintPenalties = await transaction.challengeHintUsage.aggregate({
+      where: {
+        userId: input.userId,
+        challengeId: input.challengeId,
+      },
+      _sum: { penaltyPoints: true },
+    });
+    pointsAwarded = Math.max(
+      0,
+      input.points - (hintPenalties._sum.penaltyPoints ?? 0),
+    );
     await transaction.challengeSolve.create({
       data: {
         userId: input.userId,
         challengeId: input.challengeId,
-        pointsAwarded: input.points,
+        pointsAwarded,
         solvedAt: input.submittedAt,
       },
     });
@@ -147,7 +159,7 @@ export async function persistSubmission(
 
   return {
     submission,
-    pointsAwarded: alreadySolved ? 0 : input.points,
+    pointsAwarded,
     alreadySolved,
   };
 }

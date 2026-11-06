@@ -2,9 +2,9 @@
 
 **Build. Break. Defend.**
 
-VULNFORGE is an educational cybersecurity platform in development. Its goal is to help learners understand common web security weaknesses by eventually letting them investigate controlled challenges, submit flags, track progress, and study remediation guidance.
+VULNFORGE is an educational cybersecurity platform that helps learners investigate published challenges, submit flags, track progress, and study remediation guidance.
 
-The current repository provides the landing page, authentication, and a protected student dashboard/navigation MVP. Challenge environments, flag submission, scoring, and dynamic progress features described in the roadmap are not implemented yet.
+The current repository provides the landing page, authentication, protected student workspace, the Module 4 challenge and flag-submission engine, and Module 5 hints, explanations, quizzes, and learning progress. Challenge runtime execution and challenge-authoring UI are not implemented.
 
 ## Contents
 
@@ -37,13 +37,16 @@ The current repository provides the landing page, authentication, and a protecte
 - PostgreSQL-backed sessions with an eight-hour cookie lifetime and periodic expired-session cleanup.
 - A backend health endpoint at `GET /api/health`.
 - Docker Compose configuration for PostgreSQL, the backend, and the frontend.
-- Focused backend authentication tests using Node's test runner and Supertest.
+- Module 4 challenge catalogue, attempt lifecycle, server-side flag verification, solve records, and scoring.
+- Module 5 ordered hints with per-user reveal records, confirmed penalties, and server-side adjusted solve awards.
+- Post-solve explanations, multiple-choice knowledge checks, immutable quiz-attempt results, and authenticated learning progress.
+- Focused backend authentication, challenge, schema, and learning API tests using Node's test runner and Supertest.
 
 Authentication uses server-managed sessions. Passwords are hashed with bcryptjs before storage. Registration always creates a `STUDENT`; an administrator can only be provisioned through trusted backend code.
 
 ### Not implemented yet
 
-The repository does not yet provide working challenge/lab environments, flag submissions, scoring, dynamic progress tracking, leaderboards, learning pathways, remediation content, or challenge-administration UI. Dashboard summary values are labeled unavailable until backed by real data. These remain product goals, not current features. Landing-page sections and messaging about future capabilities do not mean those capabilities are implemented.
+The repository does not provide isolated challenge runtime environments, challenge-authoring or administration UI, leaderboards, or learning pathways. Learning content is stored in the database and must be authored through trusted database/seed tooling; no public authoring API is provided. Landing-page sections and messaging about future capabilities do not mean those capabilities are implemented.
 
 ## Technology stack
 
@@ -69,9 +72,10 @@ Versions below are the versions/ranges declared in the package manifests and loc
 │   │   ├── config/       # Backend environment parsing and validation
 │   │   ├── lib/          # Prisma client and auth helpers
 │   │   ├── middleware/   # Authentication and role checks
-│   │   ├── routes/       # Health and authentication API routes
+│   │   ├── routes/       # Health, authentication, challenge, and learning APIs
 │   │   ├── scripts/      # Development test-admin provisioning
-│   │   └── auth.test.ts  # Backend auth tests
+│   │   ├── auth.test.ts  # Backend authentication tests
+│   │   └── learning.test.ts # Backend learning API tests
 │   ├── Dockerfile
 │   └── package.json
 ├── database/             # Reserved; no separate database service code
@@ -239,7 +243,7 @@ Run commands from the repository root unless a command uses `npm --prefix`.
 | `npm run build:backend` | Compile the backend TypeScript project. |
 | `npm run build:frontend` | Type-check and build the frontend with Vite. |
 | `npm test` | Run both frontend and backend production build checks; it does not run unit tests. |
-| `npm --prefix backend run test:auth` | Run backend auth tests. The API/integration and PostgreSQL session-store cases require the configured PostgreSQL database. The provisioned-account case is skipped unless both test-password environment variables are set. |
+| `npm --prefix backend run test:auth` | Run all backend authentication, challenge, schema, and learning tests. Database-backed cases require the configured PostgreSQL database. The provisioned-account case is skipped unless both test-password environment variables are set. |
 | `npm run db:generate` | Generate Prisma Client from `prisma/schema.prisma`. |
 | `npm run db:migrate` | Apply development migrations using Prisma. |
 | `npm run db:status` | Check migration status against the configured database. |
@@ -249,7 +253,7 @@ Run commands from the repository root unless a command uses `npm --prefix`.
 
 There is no separate frontend unit-test script or standalone type-check script; the frontend build runs `tsc`. The backend auth tests use Node's built-in test runner through `tsx --test`.
 
-The frontend build checks TypeScript and compiles the dashboard; no frontend unit-test or browser-test runner is configured. For manual verification, sign in at `/login`, confirm `/dashboard` shows the signed-in username, refresh to check session restoration, visit Profile/Challenges/Categories/My Progress, then log out. Repeat at a narrow viewport to inspect the horizontally scrollable mobile navigation. Browser verification is not claimed by the automated build.
+The frontend build checks TypeScript and compiles the application; no frontend unit-test or browser-test runner is configured. For manual verification, sign in at `/login`, browse `/challenges`, start an attempt, submit a flag, reveal ordered hints, solve a configured challenge, review its explanation, submit its knowledge check, and inspect `/progress`. Refresh to check session restoration and repeat at a narrow viewport to inspect the mobile navigation. Browser verification is not claimed by the automated build.
 
 The authentication suite checks registration, input validation, duplicate and concurrent duplicate registration, password hashing, email/username login, session-ID rotation, `/me`, logout invalidation, cookie attributes, role authorization, sensitive-field exclusion, rate limiting, and PostgreSQL session persistence/expiry across separate store instances. Automated HTTP tests use Express's in-memory session store; the PostgreSQL store behavior is tested directly. The full suite does not simulate restarting the backend process. Frontend authentication flows have been manually exercised in a browser with mocked API responses; there is no frontend unit-test suite, and rapid duplicate-submit prevention has not been conclusively browser-verified.
 
@@ -276,9 +280,10 @@ Any intentionally vulnerable educational labs must be isolated from the main pla
 
 - **Completed Module 1 foundation:** React landing page and PostgreSQL/Prisma setup with the initial User/Role migration.
 - **Implemented Module 2 — Authentication & User Management (final operational verification pending):** Student registration; email-or-username login; session restoration and logout; protected profile; student/admin authorization; development admin provisioner; authentication and PostgreSQL session-store tests. Automated auth tests and both application builds pass. Full backend-process-restart persistence and browser verification of rapid duplicate-submit prevention remain outstanding; see [Scripts and tests](#scripts-and-tests).
-- **Implemented Module 3 MVP — Student Dashboard & Navigation:** Protected dashboard and shared workspace layout; session restoration through `/api/auth/me`; responsive desktop/mobile navigation; account/profile and logout; challenges, categories, and progress placeholder pages; shared credentialed API helper with 401/403 error messages. Statistics remain unavailable until real challenge/progress data exists. Frontend build and diff checks have passed; browser verification remains a manual check.
-- **In progress:** No additional module is identified as in progress in the current repository.
-- **Planned:** Controlled vulnerability challenges/labs, flag submission, scoring and progress tracking, learning pathways, remediation guidance, leaderboards/analytics, and challenge administration.
+- **Implemented Module 3 MVP — Student Dashboard & Navigation:** Protected dashboard and shared workspace layout; session restoration through `/api/auth/me`; responsive navigation; account/profile and logout; shared credentialed API helper with 401/403 error messages.
+- **Implemented Module 4 — Challenge Engine:** Authenticated catalogue and details, attempt lifecycle, rate-limited server-side HMAC flag verification, unique solve records, and server-calculated points. No vulnerable runtime/container execution is included.
+- **Implemented Module 5 — Hints, Explanations & Learning Checks:** Sequential hint reveals and penalties; post-solve structured explanations; secure multiple-choice quiz submission and stored results; dashboard and progress views. Penalties reduce the solve award and are applied once when the server records the solve. Automated backend tests and production builds pass; browser verification remains a manual check.
+- **Planned:** Challenge runtime environments, challenge-authoring UI, learning pathways, leaderboards, and analytics.
 
 Folders reserved for future work are not evidence that those features are implemented.
 
