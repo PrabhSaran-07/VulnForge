@@ -955,10 +955,12 @@ router.post('/challenges/:slug/quiz/attempts', requireAuth, async (req, res) => 
       });
       if (
         questions.length === 0
-        || questions.length !== answerByQuestion.size
         || questions.some((question) => question.options.filter((option) => option.isCorrect).length !== 1)
       ) {
         return { kind: 'quiz-unavailable' as const };
+      }
+      if (questions.length !== answerByQuestion.size) {
+        return { kind: 'invalid-answers' as const };
       }
 
       const answeredQuestions = questions.map((question) => {

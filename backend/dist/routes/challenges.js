@@ -876,9 +876,11 @@ router.post('/challenges/:slug/quiz/attempts', requireAuth, async (req, res) => 
                 },
             });
             if (questions.length === 0
-                || questions.length !== answerByQuestion.size
                 || questions.some((question) => question.options.filter((option) => option.isCorrect).length !== 1)) {
                 return { kind: 'quiz-unavailable' };
+            }
+            if (questions.length !== answerByQuestion.size) {
+                return { kind: 'invalid-answers' };
             }
             const answeredQuestions = questions.map((question) => {
                 const selectedOptionId = answerByQuestion.get(question.id);
