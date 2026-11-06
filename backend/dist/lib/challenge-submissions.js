@@ -92,8 +92,28 @@ export async function persistSubmission(transaction, input) {
         });
         pointsAwarded = Math.max(0, input.points - (hintPenalties._sum.penaltyPoints ?? 0));
     if (!alreadySolved) {
-        await transaction.challengeSolve.create({
-            data: {
+        const hintPenalties = await transaction.challengeHintUsage.aggregate({
+            where: {
+                userId: input.userId,
+                challengeId: input.challengeId,
+            },
+            _sum: { penaltyPoints: true },
+        });
+        pointsAwarded = Math.max(0, input.points - (hintPenalties._sum.penaltyPoints ?? 0));
+        if (!alreadySolved) {
+            await transaction.challengeSolve.create({
+                data: {
+                    userId: input.userId,
+                    challengeId: input.challengeId,
+                    pointsAwarded,
+                    pointsAwarded: input.points,
+                    solvedAt: input.submittedAt,
+                },
+            });
+        }
+        const attemptUpdate = await transaction.challengeAttempt.updateMany({
+            where: {
+                id: input.attemptId,
                 userId: input.userId,
                 challengeId: input.challengeId,
                 pointsAwarded,
@@ -101,6 +121,15 @@ export async function persistSubmission(transaction, input) {
                 solvedAt: input.submittedAt,
             },
         });
+        if (attemptUpdate.count !== 1) {
+            throw new Error('Challenge attempt changed state before it could be solved.');
+        }
+        return {
+            submission,
+            pointsAwarded,
+            pointsAwarded: alreadySolved ? 0 : input.points,
+            alreadySolved,
+        };
     }
     const attemptUpdate = await transaction.challengeAttempt.updateMany({
         where: {
