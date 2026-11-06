@@ -13,6 +13,16 @@ const attemptIdSchema = z.string().uuid();
 const flagSubmissionSchema = z.object({
   flag: z.string().min(1).max(256),
 }).strict();
+const hintRevealSchema = z.object({
+  order: z.number().int().min(1).max(10_000),
+  confirmPenalty: z.boolean().optional(),
+}).strict();
+const quizSubmissionSchema = z.object({
+  answers: z.array(z.object({
+    questionId: z.string().uuid(),
+    optionId: z.string().uuid(),
+  }).strict()).min(1).max(100),
+}).strict();
 const difficultySchema = z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED', 'EXPERT']);
 const booleanQuerySchema = z.enum(['true', 'false']).transform((value) => value === 'true');
 const positiveIntegerQuerySchema = (maximum: number, fallback: number) => z
@@ -213,10 +223,17 @@ router.get('/challenges/:slug', requireAuth, async (req, res) => {
         title: true,
         description: true,
         learningObjectives: true,
+        context: true,
+        prerequisites: true,
         difficulty: true,
         points: true,
         category: {
           select: { id: true, slug: true, name: true, description: true },
+        },
+        solves: {
+          where: { userId: req.user!.id },
+          select: { id: true },
+          take: 1,
         },
       },
     });
@@ -228,6 +245,11 @@ router.get('/challenges/:slug', requireAuth, async (req, res) => {
       });
     }
 
+    const { solves, ...publicChallenge } = challenge;
+    return res.status(200).json({
+      challenge: {
+        ...publicChallenge,
+        solved: solves.length > 0,
     return res.status(200).json({
       challenge: {
         ...challenge,
@@ -563,5 +585,607 @@ router.post(
     }
   },
 );
+
+router.get('/challenges/:slug/hints', requireAuth, async (req, res) => {
+  const parsedSlug = slugSchema.safeParse(req.params.slug);
+  if (!parsedSlug.success) {
+    return invalidRequest(res, 'Provide a valid challenge slug.');
+  }
+
+  try {
+    const challenge = await prisma.challenge.findFirst({
+      where: {
+        slug: parsedSlug.data,
+        ...currentAvailability(new Date()),
+      },
+      select: { id: true },
+    });
+    if (!challenge) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: 'The requested challenge does not exist.',
+      });
+    }
+
+    const hints = await prisma.challengeHint.findMany({
+      where: { challengeId: challenge.id },
+      orderBy: [{ order: 'asc' }, { id: 'asc' }],
+      select: {
+        order: true,
+        content: true,
+        pointsPenalty: true,
+        usages: {
+          where: { userId: req.user!.id },
+          select: { revealedAt: true, penaltyPoints: true },
+          take: 1,
+        },
+      },
+    });
+    const revealedHints = hints.flatMap((hint) => {
+      const usage = hint.usages[0];
+      return usage
+        ? [{
+            order: hint.order,
+            content: hint.content,
+            penaltyPoints: usage.penaltyPoints,
+            revealedAt: usage.revealedAt,
+          }]
+        : [];
+    });
+    const nextHint = hints.find((hint) => hint.usages.length === 0);
+
+    return res.status(200).json({
+      hints: revealedHints,
+      nextHint: nextHint
+        ? { order: nextHint.order, penaltyPoints: nextHint.pointsPenalty }
+        : null,
+      totalPenaltyPoints: revealedHints.reduce((sum, hint) => sum + hint.penaltyPoints, 0),
+    });
+  } catch {
+    return internalError(res);
+  }
+});
+
+router.post('/challenges/:slug/hints', requireAuth, async (req, res) => {
+  const parsedSlug = slugSchema.safeParse(req.params.slug);
+  const parsedBody = hintRevealSchema.safeParse(req.body);
+  if (!parsedSlug.success || !parsedBody.success) {
+    return invalidRequest(res, 'Provide a valid challenge slug and hint order.');
+  }
+
+  try {
+    const result = await prisma.$transaction(async (transaction) => {
+      const challenges = await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"
+        FROM "challenges"
+        WHERE "slug" = ${parsedSlug.data}
+        FOR UPDATE
+      `;
+      const challengeId = challenges[0]?.id;
+      if (!challengeId) {
+        return { kind: 'not-found' as const };
+      }
+
+      const challenge = await transaction.challenge.findUnique({
+        where: { id: challengeId },
+        select: {
+          status: true,
+          availableFrom: true,
+          availableUntil: true,
+        },
+      });
+      if (!challenge || !isAvailable(challenge, new Date())) {
+        return { kind: 'not-found' as const };
+      }
+
+      const hint = await transaction.challengeHint.findUnique({
+        where: {
+          challengeId_order: {
+            challengeId,
+            order: parsedBody.data.order,
+          },
+        },
+        select: {
+          id: true,
+          order: true,
+          content: true,
+          pointsPenalty: true,
+        },
+      });
+      if (!hint) {
+        return { kind: 'not-found' as const };
+      }
+
+      const existingUsage = await transaction.challengeHintUsage.findUnique({
+        where: {
+          userId_hintId: {
+            userId: req.user!.id,
+            hintId: hint.id,
+          },
+        },
+        select: {
+          penaltyPoints: true,
+          revealedAt: true,
+        },
+      });
+      if (existingUsage) {
+        return {
+          kind: 'revealed' as const,
+          hint,
+          usage: existingUsage,
+          alreadyRevealed: true,
+        };
+      }
+
+      const earlierLockedHint = await transaction.challengeHint.findFirst({
+        where: {
+          challengeId,
+          order: { lt: hint.order },
+          usages: { none: { userId: req.user!.id } },
+        },
+        select: { id: true },
+      });
+      if (earlierLockedHint) {
+        return { kind: 'out-of-order' as const };
+      }
+
+      const activeAttempts = await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"
+        FROM "challenge_attempts"
+        WHERE "challenge_id" = ${challengeId}::uuid
+          AND "user_id" = ${req.user!.id}::uuid
+          AND "status" = 'ACTIVE'
+        ORDER BY "started_at" ASC, "id" ASC
+        LIMIT 1
+        FOR UPDATE
+      `;
+      if (!activeAttempts[0]) {
+        return { kind: 'inactive-attempt' as const };
+      }
+      if (hint.pointsPenalty > 0 && parsedBody.data.confirmPenalty !== true) {
+        return {
+          kind: 'confirmation-required' as const,
+          penaltyPoints: hint.pointsPenalty,
+        };
+      }
+
+      const usage = await transaction.challengeHintUsage.create({
+        data: {
+          userId: req.user!.id,
+          challengeId,
+          hintId: hint.id,
+          penaltyPoints: hint.pointsPenalty,
+        },
+        select: {
+          penaltyPoints: true,
+          revealedAt: true,
+        },
+      });
+      return {
+        kind: 'revealed' as const,
+        hint,
+        usage,
+        alreadyRevealed: false,
+      };
+    });
+
+    if (result.kind === 'not-found') {
+      return res.status(404).json({
+        error: 'Not found',
+        message: 'The requested challenge or hint does not exist.',
+      });
+    }
+    if (result.kind === 'confirmation-required') {
+      return res.status(409).json({
+        error: 'Penalty confirmation required',
+        message: `Revealing this hint will reduce your challenge award by ${result.penaltyPoints} points.`,
+        penaltyPoints: result.penaltyPoints,
+      });
+    }
+    if (result.kind === 'out-of-order') {
+      return res.status(409).json({
+        error: 'Hint locked',
+        message: 'Reveal the previous hint before requesting this one.',
+      });
+    }
+    if (result.kind === 'inactive-attempt') {
+      return res.status(409).json({
+        error: 'Active attempt required',
+        message: 'Start or resume an active challenge attempt before revealing a hint.',
+      });
+    }
+
+    return res.status(result.alreadyRevealed ? 200 : 201).json({
+      hint: {
+        order: result.hint.order,
+        content: result.hint.content,
+        penaltyPoints: result.usage.penaltyPoints,
+        revealedAt: result.usage.revealedAt,
+      },
+      alreadyRevealed: result.alreadyRevealed,
+    });
+  } catch {
+    return internalError(res);
+  }
+});
+
+router.get('/challenges/:slug/explanation', requireAuth, async (req, res) => {
+  const parsedSlug = slugSchema.safeParse(req.params.slug);
+  if (!parsedSlug.success) {
+    return invalidRequest(res, 'Provide a valid challenge slug.');
+  }
+
+  try {
+    const challenge = await prisma.challenge.findUnique({
+      where: { slug: parsedSlug.data },
+      select: {
+        id: true,
+        solves: {
+          where: { userId: req.user!.id },
+          select: { id: true },
+          take: 1,
+        },
+        explanation: {
+          select: {
+            rootCause: true,
+            technicalExplanation: true,
+            impact: true,
+            conditions: true,
+            secureImplementation: true,
+            remediationGuidance: true,
+            detectionIdeas: true,
+          },
+        },
+      },
+    });
+    if (!challenge) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: 'The requested challenge does not exist.',
+      });
+    }
+    if (challenge.solves.length === 0) {
+      return res.status(403).json({
+        error: 'Learning content locked',
+        message: 'Challenge explanations are available after solving the challenge.',
+      });
+    }
+
+    return res.status(200).json({ explanation: challenge.explanation });
+  } catch {
+    return internalError(res);
+  }
+});
+
+router.get('/challenges/:slug/quiz', requireAuth, async (req, res) => {
+  const parsedSlug = slugSchema.safeParse(req.params.slug);
+  if (!parsedSlug.success) {
+    return invalidRequest(res, 'Provide a valid challenge slug.');
+  }
+
+  try {
+    const challenge = await prisma.challenge.findUnique({
+      where: { slug: parsedSlug.data },
+      select: {
+        id: true,
+        solves: {
+          where: { userId: req.user!.id },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!challenge) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: 'The requested challenge does not exist.',
+      });
+    }
+    if (challenge.solves.length === 0) {
+      return res.status(403).json({
+        error: 'Learning content locked',
+        message: 'Knowledge checks are available after solving the challenge.',
+      });
+    }
+
+    const questions = await prisma.challengeQuizQuestion.findMany({
+      where: { challengeId: challenge.id },
+      orderBy: [{ order: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        order: true,
+        prompt: true,
+        options: {
+          orderBy: [{ id: 'asc' }],
+          select: { id: true, text: true },
+        },
+      },
+    });
+    return res.status(200).json({ questions });
+  } catch {
+    return internalError(res);
+  }
+});
+
+router.post('/challenges/:slug/quiz/attempts', requireAuth, async (req, res) => {
+  const parsedSlug = slugSchema.safeParse(req.params.slug);
+  const parsedBody = quizSubmissionSchema.safeParse(req.body);
+  if (!parsedSlug.success || !parsedBody.success) {
+    return invalidRequest(res, 'Provide valid answers for the challenge knowledge check.');
+  }
+  const answerByQuestion = new Map(
+    parsedBody.data.answers.map(({ questionId, optionId }) => [questionId, optionId]),
+  );
+  if (answerByQuestion.size !== parsedBody.data.answers.length) {
+    return invalidRequest(res, 'Submit exactly one answer for each question.');
+  }
+
+  try {
+    const result = await prisma.$transaction(async (transaction) => {
+      const challenge = await transaction.challenge.findUnique({
+        where: { slug: parsedSlug.data },
+        select: {
+          id: true,
+          solves: {
+            where: { userId: req.user!.id },
+            select: { id: true },
+            take: 1,
+          },
+        },
+      });
+      if (!challenge) {
+        return { kind: 'not-found' as const };
+      }
+      if (challenge.solves.length === 0) {
+        return { kind: 'locked' as const };
+      }
+
+      const questions = await transaction.challengeQuizQuestion.findMany({
+        where: { challengeId: challenge.id },
+        orderBy: [{ order: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          prompt: true,
+          options: {
+            select: {
+              id: true,
+              text: true,
+              isCorrect: true,
+              explanation: true,
+            },
+          },
+        },
+      });
+      if (
+        questions.length === 0
+        || questions.some((question) => question.options.filter((option) => option.isCorrect).length !== 1)
+      ) {
+        return { kind: 'quiz-unavailable' as const };
+      }
+      if (questions.length !== answerByQuestion.size) {
+        return { kind: 'invalid-answers' as const };
+      }
+
+      const answeredQuestions = questions.map((question) => {
+        const selectedOptionId = answerByQuestion.get(question.id);
+        const selectedOption = question.options.find((option) => option.id === selectedOptionId);
+        return selectedOption
+          ? {
+              question,
+              selectedOption,
+              isCorrect: selectedOption.isCorrect,
+            }
+          : null;
+      });
+      if (answeredQuestions.some((answer) => answer === null)) {
+        return { kind: 'invalid-answers' as const };
+      }
+
+      const validAnswers = answeredQuestions.filter((answer) => answer !== null);
+      const score = validAnswers.reduce((total, answer) => total + Number(answer.isCorrect), 0);
+      const attempt = await transaction.challengeQuizAttempt.create({
+        data: {
+          userId: req.user!.id,
+          challengeId: challenge.id,
+          score,
+          totalQuestions: questions.length,
+        },
+        select: {
+          id: true,
+          score: true,
+          totalQuestions: true,
+          submittedAt: true,
+        },
+      });
+      await transaction.challengeQuizResponse.createMany({
+        data: validAnswers.map(({ question, selectedOption, isCorrect }) => ({
+          attemptId: attempt.id,
+          challengeId: challenge.id,
+          questionId: question.id,
+          selectedOptionId: selectedOption.id,
+          isCorrect,
+        })),
+      });
+
+      return {
+        kind: 'submitted' as const,
+        attempt,
+        responses: validAnswers.map(({ question, selectedOption, isCorrect }) => ({
+          questionId: question.id,
+          prompt: question.prompt,
+          selectedOptionId: selectedOption.id,
+          isCorrect,
+          options: question.options.map((option) => ({
+            id: option.id,
+            text: option.text,
+            isCorrect: option.isCorrect,
+            explanation: option.explanation,
+          })),
+        })),
+      };
+    });
+
+    if (result.kind === 'not-found') {
+      return res.status(404).json({
+        error: 'Not found',
+        message: 'The requested challenge does not exist.',
+      });
+    }
+    if (result.kind === 'locked') {
+      return res.status(403).json({
+        error: 'Learning content locked',
+        message: 'Knowledge checks are available after solving the challenge.',
+      });
+    }
+    if (result.kind === 'quiz-unavailable') {
+      return res.status(503).json({
+        error: 'Knowledge check unavailable',
+        message: 'This challenge knowledge check is not configured correctly.',
+      });
+    }
+    if (result.kind === 'invalid-answers') {
+      return invalidRequest(res, 'Select one valid option for every question.');
+    }
+
+    return res.status(201).json({
+      attempt: {
+        ...result.attempt,
+        percentage: Math.round((result.attempt.score / result.attempt.totalQuestions) * 100),
+      },
+      responses: result.responses,
+    });
+  } catch {
+    return internalError(res);
+  }
+});
+
+router.get('/challenges/:slug/quiz/results', requireAuth, async (req, res) => {
+  const parsedSlug = slugSchema.safeParse(req.params.slug);
+  if (!parsedSlug.success) {
+    return invalidRequest(res, 'Provide a valid challenge slug.');
+  }
+
+  try {
+    const challenge = await prisma.challenge.findUnique({
+      where: { slug: parsedSlug.data },
+      select: {
+        id: true,
+        solves: {
+          where: { userId: req.user!.id },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!challenge) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: 'The requested challenge does not exist.',
+      });
+    }
+    if (challenge.solves.length === 0) {
+      return res.status(403).json({
+        error: 'Learning content locked',
+        message: 'Knowledge-check results are available after solving the challenge.',
+      });
+    }
+
+    const attempts = await prisma.challengeQuizAttempt.findMany({
+      where: {
+        userId: req.user!.id,
+        challengeId: challenge.id,
+      },
+      orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        score: true,
+        totalQuestions: true,
+        submittedAt: true,
+        responses: {
+          orderBy: [{ question: { order: 'asc' } }],
+          select: {
+            question: {
+              select: {
+                id: true,
+                prompt: true,
+                options: {
+                  orderBy: [{ id: 'asc' }],
+                  select: {
+                    id: true,
+                    text: true,
+                    isCorrect: true,
+                    explanation: true,
+                  },
+                },
+              },
+            },
+            selectedOptionId: true,
+            isCorrect: true,
+          },
+        },
+      },
+    });
+    return res.status(200).json({
+      attempts: attempts.map((attempt) => ({
+        ...attempt,
+        percentage: Math.round((attempt.score / attempt.totalQuestions) * 100),
+      })),
+    });
+  } catch {
+    return internalError(res);
+  }
+});
+
+router.get('/learning/progress', requireAuth, async (req, res) => {
+  try {
+    const [solves, hintCount, attemptChallengeIds, quizAttempts] = await prisma.$transaction([
+      prisma.challengeSolve.findMany({
+        where: { userId: req.user!.id },
+        orderBy: [{ solvedAt: 'desc' }, { id: 'desc' }],
+        select: {
+          pointsAwarded: true,
+          solvedAt: true,
+          challenge: {
+            select: { slug: true, title: true, points: true },
+          },
+        },
+      }),
+      prisma.challengeHintUsage.count({
+        where: { userId: req.user!.id },
+      }),
+      prisma.challengeAttempt.findMany({
+        where: { userId: req.user!.id },
+        distinct: ['challengeId'],
+        select: { challengeId: true },
+      }),
+      prisma.challengeQuizAttempt.findMany({
+        where: { userId: req.user!.id },
+        orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+        take: 10,
+        select: {
+          id: true,
+          score: true,
+          totalQuestions: true,
+          submittedAt: true,
+          challenge: { select: { slug: true, title: true } },
+        },
+      }),
+    ]);
+
+    return res.status(200).json({
+      points: solves.reduce((total, solve) => total + solve.pointsAwarded, 0),
+      solvedChallenges: solves.length,
+      attemptedChallenges: attemptChallengeIds.length,
+      hintsRevealed: hintCount,
+      solved: solves,
+      recentQuizAttempts: quizAttempts.map((attempt) => ({
+        ...attempt,
+        percentage: Math.round((attempt.score / attempt.totalQuestions) * 100),
+      })),
+    });
+  } catch {
+    return internalError(res);
+  }
+});
 
 export default router;

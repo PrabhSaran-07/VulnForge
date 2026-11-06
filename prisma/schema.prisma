@@ -47,6 +47,8 @@ model User {
   challengeAttempts ChallengeAttempt[]
   flagSubmissions   FlagSubmission[]
   challengeSolves   ChallengeSolve[]
+  hintUsages        ChallengeHintUsage[]
+  quizAttempts      ChallengeQuizAttempt[]
 
   @@map("users")
 }
@@ -74,11 +76,23 @@ model Challenge {
   points             Int
   status             ChallengePublicationStatus @default(DRAFT)
   learningObjectives String[]                   @default([]) @map("learning_objectives")
+  context            String?
+  prerequisites      String[]                   @default([])
   availableFrom      DateTime?                  @map("available_from")
   availableUntil     DateTime?                  @map("available_until")
   createdAt          DateTime                   @default(now()) @map("created_at")
   updatedAt          DateTime                   @updatedAt @map("updated_at")
 
+  category      Category                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  secret        ChallengeSecret?
+  attempts      ChallengeAttempt[]
+  submissions   FlagSubmission[]
+  solves        ChallengeSolve[]
+  hints         ChallengeHint[]
+  hintUsages    ChallengeHintUsage[]
+  explanation   ChallengeExplanation?
+  quizQuestions ChallengeQuizQuestion[]
+  quizAttempts  ChallengeQuizAttempt[]
   category    Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   secret      ChallengeSecret?
   attempts    ChallengeAttempt[]
@@ -152,4 +166,119 @@ model ChallengeSolve {
   @@index([userId, solvedAt])
   @@index([challengeId, solvedAt])
   @@map("challenge_solves")
+}
+
+model ChallengeHint {
+  id            String   @id @default(uuid()) @db.Uuid
+  challengeId   String   @map("challenge_id") @db.Uuid
+  order         Int
+  content       String
+  pointsPenalty Int      @default(0) @map("points_penalty")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  challenge Challenge            @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  usages    ChallengeHintUsage[]
+
+  @@unique([challengeId, order])
+  @@unique([id, challengeId])
+  @@index([challengeId, order])
+  @@map("challenge_hints")
+}
+
+model ChallengeHintUsage {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  challengeId   String   @map("challenge_id") @db.Uuid
+  hintId        String   @map("hint_id") @db.Uuid
+  penaltyPoints Int      @map("penalty_points")
+  revealedAt    DateTime @default(now()) @map("revealed_at")
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge     @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  hint      ChallengeHint @relation(fields: [hintId, challengeId], references: [id, challengeId], onDelete: Cascade)
+
+  @@unique([userId, hintId])
+  @@index([userId, challengeId, revealedAt])
+  @@map("challenge_hint_usages")
+}
+
+model ChallengeExplanation {
+  challengeId          String   @id @map("challenge_id") @db.Uuid
+  rootCause            String   @map("root_cause")
+  technicalExplanation String   @map("technical_explanation")
+  impact               String
+  conditions           String
+  secureImplementation String   @map("secure_implementation")
+  remediationGuidance  String   @map("remediation_guidance")
+  detectionIdeas       String   @map("detection_ideas")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@map("challenge_explanations")
+}
+
+model ChallengeQuizQuestion {
+  id          String @id @default(uuid()) @db.Uuid
+  challengeId String @map("challenge_id") @db.Uuid
+  order       Int
+  prompt      String
+
+  challenge Challenge               @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  options   ChallengeQuizOption[]
+  responses ChallengeQuizResponse[]
+
+  @@unique([challengeId, order])
+  @@unique([id, challengeId])
+  @@index([challengeId, order])
+  @@map("challenge_quiz_questions")
+}
+
+model ChallengeQuizOption {
+  id          String  @id @default(uuid()) @db.Uuid
+  questionId  String  @map("question_id") @db.Uuid
+  text        String
+  isCorrect   Boolean @default(false) @map("is_correct")
+  explanation String?
+
+  question  ChallengeQuizQuestion   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  responses ChallengeQuizResponse[]
+
+  @@unique([id, questionId])
+  @@index([questionId])
+  @@map("challenge_quiz_options")
+}
+
+model ChallengeQuizAttempt {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  challengeId    String   @map("challenge_id") @db.Uuid
+  score          Int
+  totalQuestions Int      @map("total_questions")
+  submittedAt    DateTime @default(now()) @map("submitted_at")
+
+  user      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge               @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  responses ChallengeQuizResponse[]
+
+  @@unique([id, challengeId])
+  @@index([userId, challengeId, submittedAt])
+  @@map("challenge_quiz_attempts")
+}
+
+model ChallengeQuizResponse {
+  id               String  @id @default(uuid()) @db.Uuid
+  attemptId        String  @map("attempt_id") @db.Uuid
+  challengeId      String  @map("challenge_id") @db.Uuid
+  questionId       String  @map("question_id") @db.Uuid
+  selectedOptionId String  @map("selected_option_id") @db.Uuid
+  isCorrect        Boolean @map("is_correct")
+
+  attempt        ChallengeQuizAttempt  @relation(fields: [attemptId, challengeId], references: [id, challengeId], onDelete: Cascade)
+  question       ChallengeQuizQuestion @relation(fields: [questionId, challengeId], references: [id, challengeId], onDelete: Restrict)
+  selectedOption ChallengeQuizOption   @relation(fields: [selectedOptionId, questionId], references: [id, questionId], onDelete: Restrict)
+
+  @@unique([attemptId, questionId])
+  @@index([questionId])
+  @@map("challenge_quiz_responses")
 }
