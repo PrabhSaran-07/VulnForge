@@ -19,6 +19,19 @@ export const accessControlLabChallenges: AuthLabChallengeContent[] = [
       { order: 2, content: 'Compare the authenticated synthetic owner against the server-stored owner for each object.', pointsPenalty: 5 },
     ],
     explanation: {
+      expectedAnswer: 'Object access must be authorized against the authenticated principal and the server-stored ownership or policy for that specific object. A valid identifier alone does not grant access.',
+      solutionSteps: [
+        'Compare the fixed synthetic document owned by the learner with the one owned by the other synthetic user.',
+        'Observe that the vulnerable decision accepts an object identifier without checking its owner.',
+        'Observe that the secure decision derives the actor from trusted server state and denies the cross-owner request.',
+        'Describe an implementation that scopes the database lookup to the authenticated owner or checks the stored owner before returning or changing the object.',
+        'Apply the same authorization rule to both reads and writes; do not rely on hidden identifiers or frontend controls.',
+      ],
+      keyTakeaways: [
+        'Authentication does not establish ownership of every object.',
+        'Perform object-level authorization on every read and write.',
+        'Derive the actor from trusted session state and deny by default.',
+      ],
       rootCause: 'The vulnerable decision treats possession of a valid object identifier as sufficient authorization and never compares the object owner with the authenticated principal.',
       technicalExplanation: 'Object-level authorization must run on every access. Resolve the principal from the server-managed session, load the object through an ownership-scoped query or compare its stored owner, and deny by default.',
       impact: 'Missing ownership checks can expose or alter another user’s records, producing insecure direct object reference or broken object-level authorization (IDOR/BOLA) issues.',
@@ -62,6 +75,19 @@ export const accessControlLabChallenges: AuthLabChallengeContent[] = [
       { order: 2, content: 'Use a server-side permission policy for each protected operation; a hidden button is not a control.', pointsPenalty: 5 },
     ],
     explanation: {
+      expectedAnswer: 'Authenticate the request, load the actor role from trusted server-side state, and enforce an explicit deny-by-default permission policy for each protected operation.',
+      solutionSteps: [
+        'Compare the fixed STUDENT and ADMIN simulator cases for the same protected action.',
+        'Note that the vulnerable path grants the action based only on the presence of an authenticated actor.',
+        'Note that the secure path checks the trusted role-to-permission policy and denies the student-only case.',
+        'Explain that client-side role displays and hidden controls are presentation only and must not enforce permissions.',
+        'Test each protected route and data operation with both permitted and denied roles.',
+      ],
+      keyTakeaways: [
+        'A valid session is not permission to perform every action.',
+        'Use trusted server-side roles or permissions and deny unlisted actions.',
+        'Test both positive and negative role cases at the server boundary.',
+      ],
       rootCause: 'The vulnerable sample grants a protected operation to any authenticated actor instead of checking the permission associated with the actor’s server-side role.',
       technicalExplanation: 'Authenticate the request first, derive the role from trusted server state, and authorize the requested action using a deny-by-default role or permission policy.',
       impact: 'Missing role and permission checks can let ordinary users view or change administrative data and actions.',
@@ -105,6 +131,19 @@ export const accessControlLabChallenges: AuthLabChallengeContent[] = [
       { order: 2, content: 'Enforce the actor’s server-side permission before applying any privilege-changing action.', pointsPenalty: 10 },
     ],
     explanation: {
+      expectedAnswer: 'Treat a requested role change as untrusted input. Deny self-promotion unless a separately authorized server-side role-management policy permits that exact transition, and audit approved changes.',
+      solutionSteps: [
+        'Choose the fixed synthetic student self-promotion scenario in the local simulator.',
+        'Compare the vulnerable decision, which trusts the requested role, with the secure decision, which requires an authorized transition.',
+        'Identify the privilege boundary: the caller must not be able to grant themselves permissions by changing request data.',
+        'Describe a narrow server-side role-management service that validates the actor, target, allowed transition, and least-privilege policy.',
+        'Record and monitor authorized role changes while testing that unauthorized transitions remain denied.',
+      ],
+      keyTakeaways: [
+        'A requested privilege is not authorization to grant that privilege.',
+        'Use least privilege and server-side checks for every privilege transition.',
+        'Audit role changes and explicitly test self-promotion and boundary cases.',
+      ],
       rootCause: 'The vulnerable decision accepts a requested privilege change without checking whether the acting principal is authorized to grant it.',
       technicalExplanation: 'Privilege-changing actions must validate the actor’s current trusted permissions, the target, and the requested transition on the server. Client-selected roles must never update trusted identity state.',
       impact: 'An unauthorized privilege transition can expose sensitive operations and allow further changes outside the actor’s intended boundary.',

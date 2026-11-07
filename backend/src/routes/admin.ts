@@ -20,6 +20,35 @@ const challengeMetadataSchema = z.object({
   points: z.number().int().min(1).max(100_000).optional(),
   learningObjectives: z.array(z.string().trim().min(1).max(300)).max(30).optional(),
 }).strict().refine((value) => Object.keys(value).length > 0);
+const educationalTextSchema = z.string().trim().min(1).max(10_000);
+const challengeContentSchema = z.object({
+  learningObjectives: z.array(z.string().trim().min(1).max(300)).min(1).max(30),
+  expectedAnswer: educationalTextSchema,
+  solutionSteps: z.array(z.string().trim().min(1).max(2_000)).min(1).max(30),
+  keyTakeaways: z.array(z.string().trim().min(1).max(500)).min(1).max(30),
+  rootCause: educationalTextSchema,
+  technicalExplanation: educationalTextSchema,
+  impact: educationalTextSchema,
+  conditions: educationalTextSchema,
+  secureImplementation: educationalTextSchema,
+  remediationGuidance: educationalTextSchema,
+  detectionIdeas: educationalTextSchema,
+  hints: z.array(z.object({
+    order: z.number().int().min(1).max(10_000),
+    content: z.string().trim().min(1).max(3_000),
+    pointsPenalty: z.number().int().min(0).max(100_000),
+  }).strict()).max(30),
+}).strict().superRefine((value, context) => {
+  const orders = value.hints.map(({ order }) => order);
+  if (new Set(orders).size !== orders.length
+    || orders.some((order, index) => index > 0 && order <= orders[index - 1])) {
+    context.addIssue({
+      code: 'custom',
+      path: ['hints'],
+      message: 'Hints must have unique, increasing order values.',
+    });
+  }
+});
 const eventQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(100_000).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -144,6 +173,151 @@ router.get('/challenges', async (req, res) => {
     return res.json({ challenges, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
   } catch {
     return res.status(500).json({ error: 'Internal server error', message: 'Unable to list challenges.' });
+  }
+});
+
+router.get('/challenges/:id/content', async (req, res) => {
+  if (!z.string().uuid().safeParse(req.params.id).success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide a valid challenge ID.' });
+  }
+  try {
+    const challenge = await prisma.challenge.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        learningObjectives: true,
+        explanation: {
+          select: {
+            expectedAnswer: true,
+            solutionSteps: true,
+            keyTakeaways: true,
+            rootCause: true,
+            technicalExplanation: true,
+            impact: true,
+            conditions: true,
+            secureImplementation: true,
+            remediationGuidance: true,
+            detectionIdeas: true,
+          },
+        },
+        hints: {
+          select: { order: true, content: true, pointsPenalty: true },
+          orderBy: { order: 'asc' },
+        },
+      },
+    });
+    if (!challenge) {
+      return res.status(404).json({ error: 'Not found', message: 'Challenge does not exist.' });
+    }
+    return res.json({ challenge });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to load challenge learning content.' });
+  }
+});
+
+router.put('/challenges/:id/content', async (req, res) => {
+  const parsed = challengeContentSchema.safeParse(req.body);
+  if (!parsed.success || !z.string().uuid().safeParse(req.params.id).success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide complete, valid challenge learning content.' });
+  }
+  const {
+    learningObjectives,
+    expectedAnswer,
+    solutionSteps,
+    keyTakeaways,
+    hints,
+    ...explanation
+  } = parsed.data;
+  try {
+    const result = await prisma.$transaction(async (transaction) => {
+      const current = await transaction.challenge.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          slug: true,
+          hints: {
+            select: { order: true, content: true, pointsPenalty: true },
+            orderBy: { order: 'asc' },
+          },
+        },
+      });
+      if (!current) {
+        return { kind: 'not-found' as const };
+      }
+
+      const hintsChanged = current.hints.length !== hints.length
+        || current.hints.some((hint, index) => {
+          const nextHint = hints[index];
+          return !nextHint
+            || hint.order !== nextHint.order
+            || hint.content !== nextHint.content
+            || hint.pointsPenalty !== nextHint.pointsPenalty;
+        });
+      if (hintsChanged) {
+        const hintUsages = await transaction.challengeHintUsage.count({
+          where: { challengeId: current.id },
+        });
+        if (hintUsages > 0) {
+          return { kind: 'hints-in-use' as const };
+        }
+        await transaction.challengeHint.deleteMany({ where: { challengeId: current.id } });
+        if (hints.length > 0) {
+          await transaction.challengeHint.createMany({
+            data: hints.map((hint) => ({ ...hint, challengeId: current.id })),
+          });
+        }
+      }
+
+      await transaction.challenge.update({
+        where: { id: current.id },
+        data: { learningObjectives },
+      });
+      await transaction.challengeExplanation.upsert({
+        where: { challengeId: current.id },
+        create: {
+          challengeId: current.id,
+          expectedAnswer,
+          solutionSteps,
+          keyTakeaways,
+          ...explanation,
+        },
+        update: {
+          expectedAnswer,
+          solutionSteps,
+          keyTakeaways,
+          ...explanation,
+        },
+      });
+      return { kind: 'updated' as const, slug: current.slug };
+    }, { isolationLevel: 'Serializable' });
+
+    if (result.kind === 'not-found') {
+      return res.status(404).json({ error: 'Not found', message: 'Challenge does not exist.' });
+    }
+    if (result.kind === 'hints-in-use') {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Hints cannot be changed after students have revealed a hint.',
+      });
+    }
+    await recordSecurityEvent({
+      eventType: 'admin_challenge_content_changed',
+      severity: 'HIGH',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      actorUserId: req.user!.id,
+      metadata: { challengeSlug: result.slug },
+    });
+    return res.json({ message: 'Challenge learning content saved.' });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2034') {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Challenge content changed concurrently. Reload it and try again.',
+      });
+    }
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to save challenge learning content.' });
   }
 });
 

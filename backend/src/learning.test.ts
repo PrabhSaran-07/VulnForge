@@ -60,6 +60,9 @@ async function createChallenge(options: { withSecret?: boolean } = {}) {
       prerequisites: ['Review request validation'],
       explanation: {
         create: {
+          expectedAnswer: 'Use a server-side policy check.',
+          solutionSteps: ['Validate the trusted actor.', 'Check the requested permission.'],
+          keyTakeaways: ['Deny by default.'],
           rootCause: 'private-root-cause-content',
           technicalExplanation: 'Technical behavior after solving.',
           impact: 'Potential impact after solving.',
@@ -176,6 +179,8 @@ test('learning endpoints require authentication and keep explanations and answer
   assert.deepEqual(details.body.challenge.prerequisites, ['Review request validation']);
   const publicJson = JSON.stringify(details.body);
   assert.equal(publicJson.includes('private-root-cause-content'), false);
+  assert.equal(publicJson.includes('Use a server-side policy check.'), false);
+  assert.equal(publicJson.includes('Validate the trusted actor.'), false);
   assert.equal(publicJson.includes(flag), false);
   assert.equal(publicJson.includes('verifierHash'), false);
 
@@ -199,8 +204,18 @@ test('learning endpoints require authentication and keep explanations and answer
   assert.equal(quizJson.includes('Authorize on the server for every protected operation.'), false);
 
   const explanation = await agent.get(`/api/challenges/${challenge.slug}/explanation`).expect(200);
+  assert.equal(explanation.body.explanation.expectedAnswer, 'Use a server-side policy check.');
+  assert.deepEqual(explanation.body.explanation.solutionSteps, [
+    'Validate the trusted actor.',
+    'Check the requested permission.',
+  ]);
+  assert.deepEqual(explanation.body.explanation.keyTakeaways, ['Deny by default.']);
   assert.equal(explanation.body.explanation.rootCause, 'private-root-cause-content');
   assert.equal(explanation.body.explanation.detectionIdeas, 'Defensive detection after solving.');
+  const explanationJson = JSON.stringify(explanation.body);
+  assert.equal(explanationJson.includes(flag), false);
+  assert.equal(explanationJson.includes('verifierHash'), false);
+  assert.equal(explanationJson.includes('verifierKeyVersion'), false);
 });
 
 test('hints unlock in order, confirm penalties, and charge each hint once under concurrency', async () => {

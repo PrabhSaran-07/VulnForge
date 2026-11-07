@@ -83,10 +83,29 @@ async function seedAccessControlLab() {
     const seeded = await prisma.$transaction(async (transaction) => {
       const existingChallenges = await transaction.challenge.findMany({
         where: { slug: { in: [...ACCESS_CONTROL_LAB_CHALLENGE_SLUGS] } },
-        select: { slug: true },
+        select: { id: true, slug: true, explanation: { select: { expectedAnswer: true } } },
       });
       if (existingChallenges.length === ACCESS_CONTROL_LAB_CHALLENGE_SLUGS.length) {
-        return false;
+        let updatedCount = 0;
+        for (const content of accessControlLabChallenges) {
+          const existing = existingChallenges.find(({ slug }) => slug === content.slug);
+          if (!existing) {
+            continue;
+          }
+          if (!existing.explanation) {
+            await transaction.challengeExplanation.create({
+              data: { challengeId: existing.id, ...content.explanation },
+            });
+            updatedCount += 1;
+          } else if (existing.explanation.expectedAnswer.length === 0) {
+            await transaction.challengeExplanation.update({
+              where: { challengeId: existing.id },
+              data: content.explanation,
+            });
+            updatedCount += 1;
+          }
+        }
+        return updatedCount > 0;
       }
       if (existingChallenges.length > 0) {
         throw new Error('Some access-control lab challenges already exist; no records were changed.');
@@ -146,8 +165,8 @@ async function seedAccessControlLab() {
     });
 
     console.info(seeded
-      ? 'Created the three local access-control challenges.'
-      : 'All three local access-control challenges already exist; left them unchanged.');
+      ? 'Created or updated educational content for the local access-control challenges.'
+      : 'Access-control challenges already have educational content; left them unchanged.');
   } finally {
     await prisma.$disconnect();
   }

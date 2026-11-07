@@ -2151,20 +2151,33 @@ pre {
   color: var(--amber);
 }
 
-.admin-metadata-form {
+.admin-metadata-form,
+.admin-content-form {
   display: grid;
   gap: 12px;
   margin-top: 12px;
 }
 
-.admin-metadata-form label {
+.admin-metadata-form label,
+.admin-content-form label {
   display: grid;
   gap: 7px;
 }
 
-.admin-metadata-form textarea {
+.admin-metadata-form textarea,
+.admin-content-form textarea {
   min-height: 100px;
   resize: vertical;
+}
+
+.admin-content-form > p {
+  color: var(--ivory-dim);
+  font-size: 13px;
+}
+
+.admin-content-form textarea {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .pagination-controls {
@@ -2519,6 +2532,35 @@ pre {
 .quiz-feedback p {
   color: var(--ivory-muted);
   font-size: 13px;
+}
+
+.solution-answer,
+.solution-steps,
+.solution-takeaways {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--elevation);
+}
+
+.solution-answer h3,
+.solution-steps h3,
+.solution-takeaways h3 {
+  margin-top: 0;
+  color: var(--amber);
+}
+
+.solution-answer p,
+.solution-steps li {
+  color: var(--ivory-muted);
+  line-height: 1.65;
+}
+
+.solution-steps ol {
+  display: grid;
+  gap: 8px;
+  padding-left: 22px;
 }
 
 .quiz-section {

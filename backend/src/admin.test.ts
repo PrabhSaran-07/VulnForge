@@ -67,6 +67,20 @@ test('administrator operations are validated, safe-projected, audited, and filte
       difficulty: 'BEGINNER',
       points: 10,
       status: 'DRAFT',
+      explanation: {
+        create: {
+          rootCause: 'Fixture root cause.',
+          technicalExplanation: 'Fixture technical explanation.',
+          impact: 'Fixture impact.',
+          conditions: 'Fixture conditions.',
+          secureImplementation: 'Fixture secure implementation.',
+          remediationGuidance: 'Fixture remediation.',
+          detectionIdeas: 'Fixture detection.',
+        },
+      },
+      hints: {
+        create: [{ order: 1, content: 'Fixture hint.', pointsPenalty: 0 }],
+      },
     },
   });
   challengeIds.add(challenge.id);
@@ -76,6 +90,8 @@ test('administrator operations are validated, safe-projected, audited, and filte
 
   await studentAgent.get('/api/admin/overview').expect(403);
   await studentAgent.patch(`/api/admin/users/${student.id}/status`).send({ isActive: false }).expect(403);
+  await studentAgent.get(`/api/admin/challenges/${challenge.id}/content`).expect(403);
+  await studentAgent.put(`/api/admin/challenges/${challenge.id}/content`).send({}).expect(403);
   await admin.get('/api/admin/overview').expect(200);
 
   const users = await admin.get(`/api/admin/users?search=${encodeURIComponent(student.username)}&limit=5`).expect(200);
@@ -86,6 +102,53 @@ test('administrator operations are validated, safe-projected, audited, and filte
   const listedChallenges = await admin.get(`/api/admin/challenges?search=${challenge.slug}`).expect(200);
   assert.equal(listedChallenges.body.challenges.length, 1);
   assert.equal(JSON.stringify(listedChallenges.body).includes('verifierHash'), false);
+
+  const content = await admin.get(`/api/admin/challenges/${challenge.id}/content`).expect(200);
+  assert.equal(content.body.challenge.explanation.expectedAnswer, '');
+  assert.deepEqual(content.body.challenge.hints, [
+    { order: 1, content: 'Fixture hint.', pointsPenalty: 0 },
+  ]);
+  assert.equal(JSON.stringify(content.body).includes('verifierHash'), false);
+  const savedContent = {
+    learningObjectives: ['Check authorization on the server'],
+    expectedAnswer: 'Use the authenticated actor and a server-side permission policy.',
+    solutionSteps: ['Identify the actor.', 'Check its permission for the operation.'],
+    keyTakeaways: ['Fail closed.', 'Test denied role cases.'],
+    rootCause: 'The fixture omitted the authorization check.',
+    technicalExplanation: 'Authentication does not grant every permission.',
+    impact: 'Protected data may be exposed or changed.',
+    conditions: 'The route trusts a session without checking the action.',
+    secureImplementation: 'Use a server-side deny-by-default policy.',
+    remediationGuidance: 'Check the required permission on every protected operation.',
+    detectionIdeas: 'Log denials and test role boundaries.',
+    hints: [{ order: 1, content: 'Inspect the trusted actor and required permission.', pointsPenalty: 0 }],
+  };
+  await admin.put(`/api/admin/challenges/${challenge.id}/content`).send(savedContent).expect(200);
+  const updatedContent = await admin.get(`/api/admin/challenges/${challenge.id}/content`).expect(200);
+  assert.deepEqual(updatedContent.body.challenge.learningObjectives, savedContent.learningObjectives);
+  assert.equal(updatedContent.body.challenge.explanation.expectedAnswer, savedContent.expectedAnswer);
+  assert.deepEqual(updatedContent.body.challenge.explanation.solutionSteps, savedContent.solutionSteps);
+  assert.deepEqual(updatedContent.body.challenge.explanation.keyTakeaways, savedContent.keyTakeaways);
+  assert.deepEqual(updatedContent.body.challenge.hints, savedContent.hints);
+  assert.equal(JSON.stringify(updatedContent.body).includes('verifierHash'), false);
+  await admin.put(`/api/admin/challenges/${challenge.id}/content`)
+    .send({ ...savedContent, hints: [{ order: 1, content: 'first', pointsPenalty: 0 }, { order: 1, content: 'duplicate', pointsPenalty: 0 }] })
+    .expect(400);
+  const savedHint = await prisma.challengeHint.findUniqueOrThrow({
+    where: { challengeId_order: { challengeId: challenge.id, order: 1 } },
+    select: { id: true },
+  });
+  await prisma.challengeHintUsage.create({
+    data: {
+      userId: student.id,
+      challengeId: challenge.id,
+      hintId: savedHint.id,
+      penaltyPoints: 0,
+    },
+  });
+  await admin.put(`/api/admin/challenges/${challenge.id}/content`)
+    .send({ ...savedContent, hints: [{ order: 1, content: 'Changed after reveal.', pointsPenalty: 0 }] })
+    .expect(409);
 
   const metadata = await admin.patch(`/api/admin/challenges/${challenge.id}`).send({
     title: 'Admin workflow fixture updated',
@@ -114,4 +177,7 @@ test('administrator operations are validated, safe-projected, audited, and filte
   assert.equal(JSON.stringify(userEvents.body).includes('passwordHash'), false);
   assert.equal(JSON.stringify(userEvents.body).includes('verifierHash'), false);
   assert.equal(JSON.stringify(userEvents.body).includes('VULNFORGE{'), false);
+  const contentEvents = await admin.get('/api/admin/events?eventType=admin_challenge_content_changed&limit=10').expect(200);
+  assert.ok(contentEvents.body.events.some((event: { metadata?: { challengeSlug?: string } }) =>
+    event.metadata?.challengeSlug === challenge.slug));
 });

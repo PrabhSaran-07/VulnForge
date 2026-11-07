@@ -210,6 +210,9 @@ model ChallengeHintUsage {
 
 model ChallengeExplanation {
   challengeId          String   @id @map("challenge_id") @db.Uuid
+  expectedAnswer       String   @default("") @map("expected_answer")
+  solutionSteps        String[] @default([]) @map("solution_steps")
+  keyTakeaways         String[] @default([]) @map("key_takeaways")
   rootCause            String   @map("root_cause")
   technicalExplanation String   @map("technical_explanation")
   impact               String

@@ -9,6 +9,9 @@ export type AuthLabChallengeContent = {
   prerequisites: string[];
   hints: Array<{ order: number; content: string; pointsPenalty: number }>;
   explanation: {
+    expectedAnswer: string;
+    solutionSteps: string[];
+    keyTakeaways: string[];
     rootCause: string;
     technicalExplanation: string;
     impact: string;
@@ -42,6 +45,18 @@ export const authLabChallenges: AuthLabChallengeContent[] = [
       { order: 2, content: 'Compare what each design returns for an unknown synthetic user and for a wrong password. The secure design uses the same failure message and limits repeated failures.', pointsPenalty: 5 },
     ],
     explanation: {
+      expectedAnswer: 'Use server-side adaptive password hashing, a consistent authentication failure response, and layered controls against repeated guessing. Never store or compare recoverable plaintext passwords.',
+      solutionSteps: [
+        'In the local simulator, compare the weak and secure decisions using only the displayed synthetic account and then an incorrect value.',
+        'Observe that the weak sample distinguishes an unknown account from an incorrect password, while the secure sample gives a generic failure.',
+        'Identify the storage boundary: the secure design verifies a candidate against an adaptive password hash on the server rather than retaining the original password.',
+        'Explain that rate limits and monitoring reduce repeated guessing but do not replace safe password storage or generic responses.',
+      ],
+      keyTakeaways: [
+        'Store adaptive password hashes, never plaintext or reversibly encrypted passwords.',
+        'Use consistent login failures to reduce account-enumeration signals.',
+        'Combine throttling and monitoring with sound credential handling.',
+      ],
       rootCause: 'The weak design compares a synthetic password directly and distinguishes an unknown account from an incorrect password. That design is intentionally confined to an in-memory local simulator.',
       technicalExplanation: 'A server should store an adaptive password hash and verify candidates with a vetted password-hashing library. Generic failure responses reduce account-enumeration signals; throttling and monitoring slow repeated failures.',
       impact: 'In a real system, plaintext or reversibly stored passwords can expose every affected account after data disclosure. Detailed login errors also help an observer identify accounts.',
@@ -85,6 +100,19 @@ export const authLabChallenges: AuthLabChallengeContent[] = [
       { order: 2, content: 'An authenticated student can still lack permission for an administrator-only action. Check identity and role separately.', pointsPenalty: 5 },
     ],
     explanation: {
+      expectedAnswer: 'Authentication must be established from server-managed session state; authorization must then independently check the trusted role and permission for the requested action. Client-supplied identity claims are not proof.',
+      solutionSteps: [
+        'Use only the fixed local simulator cases and compare the vulnerable decision with the secure decision for each case.',
+        'For the spoofed-client case, note that the secure path rejects a client assertion when there is no server-validated session.',
+        'For the student-session case, distinguish a valid identity from permission to perform an administrator-only action.',
+        'Compare the fixed known-account and unknown-account examples and note that the secure response avoids disclosing account existence.',
+        'State the defensive design: validate the session, derive identity and role from trusted server state, and check authorization on every protected operation.',
+      ],
+      keyTakeaways: [
+        'Authentication answers who is signed in; authorization answers what that identity may do.',
+        'Never trust identity, role, or authorization state supplied by the browser.',
+        'Generic authentication failures reduce account-enumeration signals.',
+      ],
       rootCause: 'The vulnerable sample treats a client-supplied authentication claim as trusted state and lets an authenticated student perform an administrator-only action.',
       technicalExplanation: 'Authentication establishes a server-verified identity. Authorization separately evaluates that identity and its permissions for each requested action. Client display state cannot substitute for either server-side check.',
       impact: 'Incorrect access decisions can expose or alter protected information. Different responses for known and unknown accounts can also reveal which synthetic identities exist.',
@@ -128,6 +156,19 @@ export const authLabChallenges: AuthLabChallengeContent[] = [
       { order: 2, content: 'A successful reset consumes the token exactly once, validates the new password, and invalidates prior sessions.', pointsPenalty: 10 },
     ],
     explanation: {
+      expectedAnswer: 'A secure password reset uses an unpredictable, short-lived, single-use token whose verifier is stored server-side. A successful reset validates the new password, consumes the token atomically, and invalidates prior sessions.',
+      solutionSteps: [
+        'Request a reset in the local synthetic flow and observe its status without attempting to retrieve a token; the token is intentionally never returned.',
+        'Compare the fixed tampered, expired, and replay cases and note that each must be rejected.',
+        'Complete the valid synthetic path with a policy-compliant new password and verify that the displayed status reports a used token and invalidated synthetic sessions.',
+        'Explain that production reset tokens need cryptographic randomness, server-side verifier storage, a short expiry, single-use consumption, and careful logging controls.',
+        'Keep the exercise scoped to the simulator: it does not send email or change a VulnForge account.',
+      ],
+      keyTakeaways: [
+        'Reset tokens are bearer secrets: protect them, expire them, and store only a verifier.',
+        'Consume each token once and reject tampered, expired, or replayed requests.',
+        'Invalidate sessions after a credential reset and avoid revealing account existence.',
+      ],
       rootCause: 'Weak reset designs use predictable or long-lived tokens, fail to consume a token after use, or allow a reset without binding confirmation to an outstanding valid request.',
       technicalExplanation: 'Generate high-entropy tokens with a cryptographic random generator, retain only a token hash, enforce a short expiry, compare safely, and atomically mark a token used when confirming a password change.',
       impact: 'A stolen, guessed, expired, or replayable reset token can allow unauthorized password changes. Existing sessions may remain usable after a legitimate password change.',

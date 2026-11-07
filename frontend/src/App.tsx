@@ -1239,6 +1239,9 @@ type QuizReview = {
 };
 
 type Explanation = {
+  expectedAnswer: string;
+  solutionSteps: string[];
+  keyTakeaways: string[];
   rootCause: string;
   technicalExplanation: string;
   impact: string;
@@ -1624,15 +1627,29 @@ function ChallengeDetailPage() {
           {learningLoading && <p role="status">Loading explanation and knowledge check...</p>}
           {learningError && <p className="form-error" role="alert">{learningError}</p>}
           {!learningLoading && explanation && (
-            <div className="explanation-grid">
-              <article><h3>Root cause</h3><p>{explanation.rootCause}</p></article>
-              <article><h3>Technical explanation</h3><p>{explanation.technicalExplanation}</p></article>
-              <article><h3>Impact</h3><p>{explanation.impact}</p></article>
-              <article><h3>Conditions</h3><p>{explanation.conditions}</p></article>
-              <article><h3>Secure implementation</h3><p>{explanation.secureImplementation}</p></article>
-              <article><h3>Remediation guidance</h3><p>{explanation.remediationGuidance}</p></article>
-              <article><h3>Detection ideas</h3><p>{explanation.detectionIdeas}</p></article>
-            </div>
+            <>
+              {explanation.expectedAnswer && <article className="solution-answer">
+                <h3>Expected educational answer</h3>
+                <p>{explanation.expectedAnswer}</p>
+              </article>}
+              {explanation.solutionSteps.length > 0 && <article className="solution-steps">
+                <h3>Step-by-step solution</h3>
+                <ol>{explanation.solutionSteps.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}</ol>
+              </article>}
+              <div className="explanation-grid">
+                <article><h3>Root cause</h3><p>{explanation.rootCause}</p></article>
+                <article><h3>Technical explanation</h3><p>{explanation.technicalExplanation}</p></article>
+                <article><h3>Impact</h3><p>{explanation.impact}</p></article>
+                <article><h3>Conditions</h3><p>{explanation.conditions}</p></article>
+                <article><h3>Secure implementation</h3><p>{explanation.secureImplementation}</p></article>
+                <article><h3>Remediation guidance</h3><p>{explanation.remediationGuidance}</p></article>
+                <article><h3>Detection ideas</h3><p>{explanation.detectionIdeas}</p></article>
+              </div>
+              {explanation.keyTakeaways.length > 0 && <article className="solution-takeaways">
+                <h3>Key takeaways</h3>
+                <ul>{explanation.keyTakeaways.map((takeaway) => <li key={takeaway}>{takeaway}</li>)}</ul>
+              </article>}
+            </>
           )}
           {!learningLoading && !explanation && <p className="learning-empty">No explanation has been added for this challenge yet.</p>}
 
@@ -1899,6 +1916,22 @@ type AdminOverview = {
 };
 type AdminUser = { id: string; username: string; role: UserRole; isActive: boolean; createdAt: string };
 type AdminChallenge = { id: string; slug: string; title: string; description: string; status: string; difficulty: string; points: number; category: { name: string; slug: string } };
+type AdminChallengeContent = {
+  id: string;
+  slug: string;
+  learningObjectives: string[];
+  expectedAnswer: string;
+  solutionSteps: string[];
+  keyTakeaways: string[];
+  rootCause: string;
+  technicalExplanation: string;
+  impact: string;
+  conditions: string;
+  secureImplementation: string;
+  remediationGuidance: string;
+  detectionIdeas: string;
+  hints: Array<{ order: number; content: string; pointsPenalty: number }>;
+};
 type AdminSubmission = { id: string; result: string; submittedAt: string; user: { username: string }; challenge: { title: string; slug: string } };
 
 function AdminPage() {
@@ -1906,6 +1939,7 @@ function AdminPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [challenges, setChallenges] = useState<AdminChallenge[]>([]);
+  const [contentDraft, setContentDraft] = useState<AdminChallengeContent | null>(null);
   const [submissions, setSubmissions] = useState<AdminSubmission[]>([]);
   const [analytics, setAnalytics] = useState<Array<{ slug: string; title: string; solves: number; attempts: number; hintReveals: number; averageAttemptsPerSolve: number | null }>>([]);
   const [studentProgress, setStudentProgress] = useState<Array<{ username: string; points: number; solvedChallenges: number }>>([]);
@@ -1998,6 +2032,86 @@ function AdminPage() {
       setError(requestError instanceof Error ? requestError.message : 'Unable to save challenge metadata.');
     }
   };
+  const editChallengeContent = async (challenge: AdminChallenge) => {
+    setError('');
+    try {
+      const data = await apiRequest<{ challenge: {
+        id: string;
+        slug: string;
+        learningObjectives: string[];
+        explanation: Omit<AdminChallengeContent, 'id' | 'slug' | 'learningObjectives' | 'hints'> | null;
+        hints: AdminChallengeContent['hints'];
+      } }>(`/api/admin/challenges/${challenge.id}/content`);
+      setContentDraft({
+        id: data.challenge.id,
+        slug: data.challenge.slug,
+        learningObjectives: data.challenge.learningObjectives,
+        expectedAnswer: data.challenge.explanation?.expectedAnswer ?? '',
+        solutionSteps: data.challenge.explanation?.solutionSteps ?? [],
+        keyTakeaways: data.challenge.explanation?.keyTakeaways ?? [],
+        rootCause: data.challenge.explanation?.rootCause ?? '',
+        technicalExplanation: data.challenge.explanation?.technicalExplanation ?? '',
+        impact: data.challenge.explanation?.impact ?? '',
+        conditions: data.challenge.explanation?.conditions ?? '',
+        secureImplementation: data.challenge.explanation?.secureImplementation ?? '',
+        remediationGuidance: data.challenge.explanation?.remediationGuidance ?? '',
+        detectionIdeas: data.challenge.explanation?.detectionIdeas ?? '',
+        hints: data.challenge.hints,
+      });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load challenge learning content.');
+    }
+  };
+  const saveChallengeContent = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!contentDraft) return;
+    const formData = new FormData(event.currentTarget);
+    const text = (name: string) => {
+      const value = formData.get(name);
+      return typeof value === 'string' ? value : '';
+    };
+    const lines = (name: string) => text(name).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    const hints = lines('hints').map((line) => {
+      const [orderValue, penaltyValue, ...contentParts] = line.split('|');
+      return {
+        order: Number(orderValue),
+        pointsPenalty: Number(penaltyValue),
+        content: contentParts.join('|').trim(),
+      };
+    });
+    if (hints.some((hint) => !Number.isInteger(hint.order)
+      || !Number.isInteger(hint.pointsPenalty)
+      || !hint.content)) {
+      setError('Enter each hint as order | penalty points | hint text.');
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await apiRequest(`/api/admin/challenges/${contentDraft.id}/content`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          learningObjectives: lines('learningObjectives'),
+          expectedAnswer: text('expectedAnswer'),
+          solutionSteps: lines('solutionSteps'),
+          keyTakeaways: lines('keyTakeaways'),
+          rootCause: text('rootCause'),
+          technicalExplanation: text('technicalExplanation'),
+          impact: text('impact'),
+          conditions: text('conditions'),
+          secureImplementation: text('secureImplementation'),
+          remediationGuidance: text('remediationGuidance'),
+          detectionIdeas: text('detectionIdeas'),
+          hints,
+        }),
+      });
+      setNotice(`Learning content saved for ${contentDraft.slug}.`);
+      setContentDraft(null);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to save challenge learning content.');
+    }
+  };
 
   if (user?.role !== 'ADMIN') {
     return <section className="learning-page"><p className="form-error" role="alert">This workspace is restricted to administrators.</p></section>;
@@ -2037,6 +2151,34 @@ function AdminPage() {
               <label>Description<textarea name="description" defaultValue={challenge.description} maxLength={10_000} required /></label>
               <button className="button button-secondary" type="submit">Save metadata</button>
             </form>
+          </details>
+          <details open={contentDraft?.id === challenge.id}>
+            <summary onClick={(event) => {
+              if (!contentDraft || contentDraft.id !== challenge.id) {
+                event.preventDefault();
+                void editChallengeContent(challenge);
+              } else {
+                setContentDraft(null);
+              }
+            }}>Edit educational answers, explanations, objectives and hints</summary>
+            {contentDraft?.id === challenge.id && <form className="admin-content-form" onSubmit={(event) => void saveChallengeContent(event)}>
+              <p>These are educational solutions, not CTF flags. Hints can only be changed before any learner has revealed one.</p>
+              <label>Learning objectives<textarea name="learningObjectives" defaultValue={contentDraft.learningObjectives.join('\n')} required /></label>
+              <label>Expected educational answer<textarea name="expectedAnswer" defaultValue={contentDraft.expectedAnswer} required /></label>
+              <label>Step-by-step solution<textarea name="solutionSteps" defaultValue={contentDraft.solutionSteps.join('\n')} required /></label>
+              <label>Key takeaways<textarea name="keyTakeaways" defaultValue={contentDraft.keyTakeaways.join('\n')} required /></label>
+              <label>Root cause<textarea name="rootCause" defaultValue={contentDraft.rootCause} required /></label>
+              <label>Technical explanation<textarea name="technicalExplanation" defaultValue={contentDraft.technicalExplanation} required /></label>
+              <label>Impact<textarea name="impact" defaultValue={contentDraft.impact} required /></label>
+              <label>Conditions<textarea name="conditions" defaultValue={contentDraft.conditions} required /></label>
+              <label>Secure implementation<textarea name="secureImplementation" defaultValue={contentDraft.secureImplementation} required /></label>
+              <label>Remediation guidance<textarea name="remediationGuidance" defaultValue={contentDraft.remediationGuidance} required /></label>
+              <label>Detection ideas<textarea name="detectionIdeas" defaultValue={contentDraft.detectionIdeas} required /></label>
+              <label>Hints (one per line: order | penalty points | hint text)
+                <textarea name="hints" defaultValue={contentDraft.hints.map((hint) => `${hint.order} | ${hint.pointsPenalty} | ${hint.content}`).join('\n')} />
+              </label>
+              <button className="button button-secondary" type="submit">Save learning content</button>
+            </form>}
           </details>
         </div>)}
       </section>

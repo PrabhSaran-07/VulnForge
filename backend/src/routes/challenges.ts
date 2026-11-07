@@ -904,6 +904,9 @@ router.get('/challenges/:slug/explanation', requireAuth, async (req, res) => {
         },
         explanation: {
           select: {
+            expectedAnswer: true,
+            solutionSteps: true,
+            keyTakeaways: true,
             rootCause: true,
             technicalExplanation: true,
             impact: true,
