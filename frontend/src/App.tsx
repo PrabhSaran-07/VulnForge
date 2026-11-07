@@ -1940,6 +1940,8 @@ type LabAnswerBankEntry = {
   title: string;
   statement: string;
   category: { slug: string; name: string };
+  acceptedDemoFlag: string | null;
+  demoFlagStatus: 'AVAILABLE' | 'NOT_CONFIGURED';
   learningObjectives: string[];
   answerStatus: 'COMPLETE' | 'NEEDS_ANSWER';
   explanation: Omit<AdminChallengeContent, 'id' | 'slug' | 'learningObjectives' | 'hints'> | null;
@@ -2304,7 +2306,7 @@ function LabAnswerBankPage() {
     <section className="learning-page">
       <SectionCode>[ ADMINISTRATION · EDUCATIONAL CONTENT ]</SectionCode>
       <h1>Lab Answer Bank</h1>
-      <p className="learning-intro">Review and manage answers for the six implemented AUTH and AC challenges. These educational answers are not CTF flags.</p>
+      <p className="learning-intro">Review the educational solutions, exact accepted demo flags, and quiz keys for the six implemented AUTH and AC challenges. Demo flags are administrator-only and verified against the active challenge verifier.</p>
       {notice && <p className="learning-notice" role="status">{notice}</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       <form className="learning-card answer-bank-filters" onSubmit={(event) => void loadAnswerBank(event)}>
@@ -2379,7 +2381,11 @@ function AnswerBankChallenge({
       <h3>{entry.title}</h3>
       <p><strong>Original challenge statement:</strong> {entry.statement}</p>
       {entry.learningObjectives.length > 0 && <><h4>Concepts / objectives</h4><ul>{entry.learningObjectives.map((objective) => <li key={objective}>{objective}</li>)}</ul></>}
-      <h4>Expected educational answer</h4>
+      <h4>Exact accepted demo flag for Flag Submission</h4>
+      {entry.acceptedDemoFlag
+        ? <p><code>{entry.acceptedDemoFlag}</code> <span>Copy the entire value exactly, including braces.</span></p>
+        : <p className="answer-missing">No configured demo flag currently matches this challenge's active verifier.</p>}
+      <h4>Challenge solution / educational answer</h4>
       {explanation?.expectedAnswer
         ? <p>{explanation.expectedAnswer}</p>
         : <p className="answer-missing">This challenge still needs an educational answer.</p>}

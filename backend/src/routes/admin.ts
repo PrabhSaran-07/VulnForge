@@ -8,6 +8,7 @@ import {
   ACCESS_CONTROL_LAB_CHALLENGE_SLUGS,
   AUTH_LAB_CHALLENGE_SLUGS,
 } from '../lib/auth-lab.js';
+import { verifySubmittedFlag } from '../lib/challenge-submissions.js';
 
 const router = Router();
 const pageSchema = z.object({
@@ -65,6 +66,41 @@ const labAnswerBankQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   category: z.enum(['authentication-security', 'access-control']).optional(),
 }).strict();
+const demoFlagConfiguration: Readonly<Record<string, { variable: string; key: string }>> = {
+  'auth-01-weak-authentication': { variable: 'VULNFORGE_AUTH_LAB_FLAGS', key: 'AUTH-01' },
+  'auth-02-authentication-check': { variable: 'VULNFORGE_AUTH_LAB_FLAGS', key: 'AUTH-02' },
+  'auth-03-password-reset': { variable: 'VULNFORGE_AUTH_LAB_FLAGS', key: 'AUTH-03' },
+  'ac-01-object-level-access-control': { variable: 'VULNFORGE_ACCESS_LAB_FLAGS', key: 'AC-01' },
+  'ac-02-role-permission-enforcement': { variable: 'VULNFORGE_ACCESS_LAB_FLAGS', key: 'AC-02' },
+  'ac-03-privilege-boundary-failure': { variable: 'VULNFORGE_ACCESS_LAB_FLAGS', key: 'AC-03' },
+};
+
+function getAcceptedDemoFlag(
+  slug: string,
+  secret: { verifierHash: string; verifierKeyVersion: string } | null,
+): string | null {
+  const configuration = demoFlagConfiguration[slug];
+  if (!configuration || !secret) {
+    return null;
+  }
+
+  let flags: unknown;
+  try {
+    flags = JSON.parse(process.env[configuration.variable] ?? '');
+  } catch {
+    return null;
+  }
+  if (typeof flags !== 'object' || flags === null || Array.isArray(flags)) {
+    return null;
+  }
+  const flag = (flags as Record<string, unknown>)[configuration.key];
+  if (typeof flag !== 'string'
+    || !/^VULNFORGE\{[A-Za-z0-9_-]{1,240}\}$/.test(flag)
+    || verifySubmittedFlag(flag, secret.verifierHash, secret.verifierKeyVersion) !== true) {
+    return null;
+  }
+  return flag;
+}
 
 function countAll(value: unknown): number {
   return typeof value === 'object'
@@ -221,6 +257,7 @@ router.get('/lab-answer-bank', async (req, res) => {
         slug: true,
         title: true,
         description: true,
+        secret: { select: { verifierHash: true, verifierKeyVersion: true } },
         learningObjectives: true,
         category: { select: { slug: true, name: true } },
         explanation: {
@@ -260,6 +297,7 @@ router.get('/lab-answer-bank', async (req, res) => {
     return res.json({
       challenges: challenges.map((challenge) => {
         const explanation = challenge.explanation;
+        const acceptedDemoFlag = getAcceptedDemoFlag(challenge.slug, challenge.secret);
         const answerComplete = Boolean(explanation?.expectedAnswer.trim())
           && Boolean(explanation?.solutionSteps.length)
           && Boolean(explanation?.keyTakeaways.length)
@@ -276,6 +314,8 @@ router.get('/lab-answer-bank', async (req, res) => {
           title: challenge.title,
           statement: challenge.description,
           category: challenge.category,
+          acceptedDemoFlag,
+          demoFlagStatus: acceptedDemoFlag ? 'AVAILABLE' : 'NOT_CONFIGURED',
           learningObjectives: challenge.learningObjectives,
           hints: challenge.hints,
           answerStatus: answerComplete ? 'COMPLETE' : 'NEEDS_ANSWER',

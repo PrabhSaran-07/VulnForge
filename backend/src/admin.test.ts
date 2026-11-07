@@ -5,6 +5,7 @@ import request from 'supertest';
 import { hashPassword } from './lib/auth.js';
 import { accessControlLabChallenges } from './lib/access-control-lab-content.js';
 import { authLabChallenges } from './lib/auth-lab-content.js';
+import { verifySubmittedFlag } from './lib/challenge-submissions.js';
 
 process.env.NODE_ENV = 'test';
 const { default: app } = await import('./app.js');
@@ -134,13 +135,26 @@ test('administrator operations are validated, safe-projected, audited, and filte
     'ac-03-privilege-boundary-failure',
   ]);
   assert.ok(answerBank.body.challenges.every((entry: { slug: string }) => implementedSlugs.has(entry.slug)));
+  assert.equal(answerBank.body.challenges.length, implementedSlugs.size);
   if (answerBank.body.challenges.length > 0) {
     assert.ok(answerBank.body.challenges.every((entry: LabAnswerBankTestEntry) =>
       entry.answerStatus === 'COMPLETE'
+      && entry.demoFlagStatus === 'AVAILABLE'
+      && typeof entry.acceptedDemoFlag === 'string'
       && entry.questions.every((question) => question.answerStatus === 'COMPLETE')));
+    for (const entry of answerBank.body.challenges as LabAnswerBankTestEntry[]) {
+      const secret = await prisma.challengeSecret.findUnique({
+        where: { challengeId: entry.id },
+        select: { verifierHash: true, verifierKeyVersion: true },
+      });
+      assert.ok(secret);
+      assert.equal(verifySubmittedFlag(entry.acceptedDemoFlag!, secret.verifierHash, secret.verifierKeyVersion), true);
+      const publicChallenge = await studentAgent.get(`/api/challenges/${entry.slug}`).expect(200);
+      assert.equal(JSON.stringify(publicChallenge.body).includes(entry.acceptedDemoFlag!), false);
+    }
   }
   const bankJson = JSON.stringify(answerBank.body);
-  for (const secretField of ['verifierHash', 'verifierKeyVersion', 'passwordHash', 'VULNFORGE{']) {
+  for (const secretField of ['verifierHash', 'verifierKeyVersion', 'passwordHash']) {
     assert.equal(bankJson.includes(secretField), false);
   }
   const searchableEntry = answerBank.body.challenges[0];
@@ -207,6 +221,10 @@ test('administrator operations are validated, safe-projected, audited, and filte
   });
 
   type LabAnswerBankTestEntry = {
+    id: string;
+    slug: string;
+    acceptedDemoFlag: string | null;
+    demoFlagStatus: string;
     answerStatus: string;
     questions: Array<{ answerStatus: string }>;
   };
