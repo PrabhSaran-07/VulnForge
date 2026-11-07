@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, test } from 'node:test';
 import request from 'supertest';
 import { hashPassword } from './lib/auth.js';
+import { accessControlLabChallenges } from './lib/access-control-lab-content.js';
+import { authLabChallenges } from './lib/auth-lab-content.js';
 
 process.env.NODE_ENV = 'test';
 const { default: app } = await import('./app.js');
@@ -11,6 +13,33 @@ const prisma = (await import('./lib/prisma.js')).default;
 const userIds = new Set<string>();
 const categoryIds = new Set<string>();
 const challengeIds = new Set<string>();
+
+test('all six authored labs have complete educational answers and exactly one explained quiz answer per question', () => {
+  const challenges = [...authLabChallenges, ...accessControlLabChallenges];
+  assert.equal(challenges.length, 6);
+  assert.equal(challenges.reduce((count, challenge) => count + challenge.questions.length, 0), 12);
+  for (const challenge of challenges) {
+    assert.ok(challenge.explanation.expectedAnswer.trim(), `${challenge.slug} needs an educational answer`);
+    assert.ok(challenge.explanation.solutionSteps.length, `${challenge.slug} needs solution steps`);
+    assert.ok(challenge.explanation.keyTakeaways.length, `${challenge.slug} needs takeaways`);
+    for (const field of [
+      'rootCause',
+      'technicalExplanation',
+      'impact',
+      'conditions',
+      'secureImplementation',
+      'remediationGuidance',
+      'detectionIdeas',
+    ] as const) {
+      assert.ok(challenge.explanation[field].trim(), `${challenge.slug} needs ${field}`);
+    }
+    for (const question of challenge.questions) {
+      const correctOptions = question.options.filter((option) => option.isCorrect);
+      assert.equal(correctOptions.length, 1, `${challenge.slug}: ${question.prompt}`);
+      assert.ok(correctOptions[0].explanation.trim(), `${challenge.slug}: correct answer needs an explanation`);
+    }
+  }
+});
 
 async function createAccount(role: 'STUDENT' | 'ADMIN') {
   const suffix = randomUUID();
@@ -92,7 +121,45 @@ test('administrator operations are validated, safe-projected, audited, and filte
   await studentAgent.patch(`/api/admin/users/${student.id}/status`).send({ isActive: false }).expect(403);
   await studentAgent.get(`/api/admin/challenges/${challenge.id}/content`).expect(403);
   await studentAgent.put(`/api/admin/challenges/${challenge.id}/content`).send({}).expect(403);
+  await studentAgent.get('/api/admin/lab-answer-bank').expect(403);
   await admin.get('/api/admin/overview').expect(200);
+  const answerBank = await admin.get('/api/admin/lab-answer-bank').expect(200);
+  assert.deepEqual(answerBank.body.futureModules, { status: 'COMING_SOON', modules: [8, 9, 10, 11, 12] });
+  const implementedSlugs = new Set([
+    'auth-01-weak-authentication',
+    'auth-02-authentication-check',
+    'auth-03-password-reset',
+    'ac-01-object-level-access-control',
+    'ac-02-role-permission-enforcement',
+    'ac-03-privilege-boundary-failure',
+  ]);
+  assert.ok(answerBank.body.challenges.every((entry: { slug: string }) => implementedSlugs.has(entry.slug)));
+  if (answerBank.body.challenges.length > 0) {
+    assert.ok(answerBank.body.challenges.every((entry: LabAnswerBankTestEntry) =>
+      entry.answerStatus === 'COMPLETE'
+      && entry.questions.every((question) => question.answerStatus === 'COMPLETE')));
+  }
+  const bankJson = JSON.stringify(answerBank.body);
+  for (const secretField of ['verifierHash', 'verifierKeyVersion', 'passwordHash', 'VULNFORGE{']) {
+    assert.equal(bankJson.includes(secretField), false);
+  }
+  const searchableEntry = answerBank.body.challenges[0];
+  if (searchableEntry) {
+    const searchResult = await admin.get(`/api/admin/lab-answer-bank?search=${encodeURIComponent(searchableEntry.slug)}`).expect(200);
+    assert.ok(searchResult.body.challenges.some((entry: { id: string }) => entry.id === searchableEntry.id));
+    const questionSearch = await admin.get(`/api/admin/lab-answer-bank?search=${encodeURIComponent(searchableEntry.questions[0].prompt)}`).expect(200);
+    assert.ok(questionSearch.body.challenges.some((entry: { id: string }) => entry.id === searchableEntry.id));
+    const categoryResult = await admin.get(`/api/admin/lab-answer-bank?category=${searchableEntry.category.slug}`).expect(200);
+    assert.ok(categoryResult.body.challenges.every((entry: { category: { slug: string } }) =>
+      entry.category.slug === searchableEntry.category.slug));
+    for (const entry of answerBank.body.challenges) {
+      for (const question of entry.questions) {
+        assert.ok(question.answerStatus === 'COMPLETE' || question.answerStatus === 'NEEDS_ANSWER');
+        assert.equal(question.correctAnswers.some((answer: { isCorrect?: boolean }) => 'isCorrect' in answer), false);
+      }
+    }
+  }
+  await admin.get('/api/admin/lab-answer-bank?category=modules-8').expect(400);
 
   const users = await admin.get(`/api/admin/users?search=${encodeURIComponent(student.username)}&limit=5`).expect(200);
   assert.equal(users.body.users.length, 1);
@@ -138,6 +205,11 @@ test('administrator operations are validated, safe-projected, audited, and filte
     where: { challengeId_order: { challengeId: challenge.id, order: 1 } },
     select: { id: true },
   });
+
+  type LabAnswerBankTestEntry = {
+    answerStatus: string;
+    questions: Array<{ answerStatus: string }>;
+  };
   await prisma.challengeHintUsage.create({
     data: {
       userId: student.id,

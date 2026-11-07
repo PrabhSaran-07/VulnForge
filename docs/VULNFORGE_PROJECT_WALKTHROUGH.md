@@ -38,7 +38,7 @@ Administrator accounts are provisioned through trusted backend administration, n
 
 ## 4. Student dashboard and navigation
 
-After login, the protected workspace provides links to Dashboard, Challenges, Categories, My Progress, Leaderboard, Analytics, and Profile. Administrators also see links to the Admin workspace and Blue-Team events.
+After login, the protected workspace provides links to Dashboard, Challenges, Categories, My Progress, Leaderboard, Analytics, and Profile. Administrators also see links to the Admin workspace, Lab Answer Bank, and Blue-Team events.
 
 The dashboard and progress views reflect stored challenge attempts, solves, hints, and quiz results. Category listings come from currently available published challenges. Planned modules are visibly marked **Coming Soon**.
 
@@ -102,7 +102,7 @@ The simulator compares vulnerable and defensive decisions. It does not read or m
 
 ## 9. Admin dashboard and challenge content management
 
-An authenticated administrator can open the Admin workspace to review platform counts, users, challenges, challenge performance, student progress summaries, and recent flag-submission outcomes.
+An authenticated administrator can open the Admin workspace to review platform counts, users, challenges, challenge performance, student progress summaries, and recent flag-submission outcomes. The dedicated **Lab Answer Bank** groups the published AUTH and AC challenges, supports search by challenge ID/title/question and category filtering, shows answer completeness, and displays the quiz answer key.
 
 For an existing challenge, the administrator can edit:
 

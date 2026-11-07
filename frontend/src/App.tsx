@@ -817,6 +817,7 @@ function WorkspaceLayout({ children }: { children: ReactNode }) {
               <span className="workspace-nav-heading">ADMINISTRATION</span>
               {[
                 { path: '/admin', label: 'Admin workspace', short: 'AD' },
+                { path: '/admin/lab-answer-bank', label: 'Lab Answer Bank', short: 'AB' },
                 { path: '/security-events', label: 'Blue-Team events', short: 'EV' },
               ].map((item) => (
                 <Link
@@ -1933,6 +1934,24 @@ type AdminChallengeContent = {
   hints: Array<{ order: number; content: string; pointsPenalty: number }>;
 };
 type AdminSubmission = { id: string; result: string; submittedAt: string; user: { username: string }; challenge: { title: string; slug: string } };
+type LabAnswerBankEntry = {
+  id: string;
+  slug: string;
+  title: string;
+  statement: string;
+  category: { slug: string; name: string };
+  learningObjectives: string[];
+  answerStatus: 'COMPLETE' | 'NEEDS_ANSWER';
+  explanation: Omit<AdminChallengeContent, 'id' | 'slug' | 'learningObjectives' | 'hints'> | null;
+  hints: AdminChallengeContent['hints'];
+  questions: Array<{
+    id: string;
+    order: number;
+    prompt: string;
+    answerStatus: 'COMPLETE' | 'NEEDS_ANSWER';
+    correctAnswers: Array<{ text: string; explanation: string | null }>;
+  }>;
+};
 
 function AdminPage() {
   const { user } = useAuth();
@@ -2197,6 +2216,223 @@ function AdminPage() {
   );
 }
 
+function LabAnswerBankPage() {
+  const { user } = useAuth();
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
+  const [entries, setEntries] = useState<LabAnswerBankEntry[]>([]);
+  const [editing, setEditing] = useState<LabAnswerBankEntry | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const loadAnswerBank = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    setLoading(true);
+    setError('');
+    const query = new URLSearchParams();
+    if (search.trim()) query.set('search', search.trim());
+    if (category) query.set('category', category);
+    try {
+      const data = await apiRequest<{ challenges: LabAnswerBankEntry[]; futureModules: { status: string; modules: number[] } }>(
+        `/api/admin/lab-answer-bank${query.size ? `?${query}` : ''}`,
+      );
+      setEntries(data.challenges);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load the lab answer bank.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role === 'ADMIN') void loadAnswerBank();
+  }, [user?.role]);
+
+  const saveEntry = async (entry: LabAnswerBankEntry, event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const text = (name: string) => {
+      const value = formData.get(name);
+      return typeof value === 'string' ? value : '';
+    };
+    const lines = (name: string) => text(name).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    const hints = lines('hints').map((line) => {
+      const [orderValue, penaltyValue, ...contentParts] = line.split('|');
+      return { order: Number(orderValue), pointsPenalty: Number(penaltyValue), content: contentParts.join('|').trim() };
+    });
+    if (hints.some((hint) => !Number.isInteger(hint.order)
+      || !Number.isInteger(hint.pointsPenalty)
+      || !hint.content)) {
+      setError('Enter each hint as order | penalty points | hint text.');
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await apiRequest(`/api/admin/challenges/${entry.id}/content`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          learningObjectives: lines('learningObjectives'),
+          expectedAnswer: text('expectedAnswer'),
+          solutionSteps: lines('solutionSteps'),
+          keyTakeaways: lines('keyTakeaways'),
+          rootCause: text('rootCause'),
+          technicalExplanation: text('technicalExplanation'),
+          impact: text('impact'),
+          conditions: text('conditions'),
+          secureImplementation: text('secureImplementation'),
+          remediationGuidance: text('remediationGuidance'),
+          detectionIdeas: text('detectionIdeas'),
+          hints,
+        }),
+      });
+      setNotice(`Educational answer saved for ${entry.slug}.`);
+      setEditing(null);
+      await loadAnswerBank();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to save educational content.');
+    }
+  };
+
+  if (user?.role !== 'ADMIN') {
+    return <section className="learning-page"><p className="form-error" role="alert">The Lab Answer Bank is restricted to administrators.</p></section>;
+  }
+
+  return (
+    <section className="learning-page">
+      <SectionCode>[ ADMINISTRATION · EDUCATIONAL CONTENT ]</SectionCode>
+      <h1>Lab Answer Bank</h1>
+      <p className="learning-intro">Review and manage answers for the six implemented AUTH and AC challenges. These educational answers are not CTF flags.</p>
+      {notice && <p className="learning-notice" role="status">{notice}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <form className="learning-card answer-bank-filters" onSubmit={(event) => void loadAnswerBank(event)}>
+        <label>Search challenge ID, title or question
+          <input value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} />
+        </label>
+        <label>Lab category
+          <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <option value="">All implemented labs</option>
+            <option value="authentication-security">Authentication Security</option>
+            <option value="access-control">Access Control Security</option>
+          </select>
+        </label>
+        <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Searching...' : 'Search answer bank'}</button>
+      </form>
+
+      <section className="answer-bank-category">
+        <h2>Authentication Security</h2>
+        {entries.filter((entry) => entry.category.slug === 'authentication-security').map((entry) => (
+          <AnswerBankChallenge key={entry.id} entry={entry} editing={editing?.id === entry.id}
+            onEdit={() => setEditing(entry)} onCancel={() => setEditing(null)}
+            onSave={(event) => void saveEntry(entry, event)} />
+        ))}
+        {!loading && entries.every((entry) => entry.category.slug !== 'authentication-security') && (
+          <p className="learning-empty">No matching published Authentication Security challenges.</p>
+        )}
+      </section>
+
+      <section className="answer-bank-category">
+        <h2>Access Control Security</h2>
+        {entries.filter((entry) => entry.category.slug === 'access-control').map((entry) => (
+          <AnswerBankChallenge key={entry.id} entry={entry} editing={editing?.id === entry.id}
+            onEdit={() => setEditing(entry)} onCancel={() => setEditing(null)}
+            onSave={(event) => void saveEntry(entry, event)} />
+        ))}
+        {!loading && entries.every((entry) => entry.category.slug !== 'access-control') && (
+          <p className="learning-empty">No matching published Access Control challenges.</p>
+        )}
+      </section>
+
+      <section className="learning-card future-modules-card">
+        <div className="learning-card-meta"><span>FUTURE MODULES</span><span className="planned-status">COMING SOON</span></div>
+        <h2>Modules 8–12</h2>
+        <p>These modules do not have implemented challenges or answer keys. No future-module answers are shown.</p>
+      </section>
+    </section>
+  );
+}
+
+function AnswerBankChallenge({
+  entry,
+  editing,
+  onEdit,
+  onCancel,
+  onSave,
+}: {
+  entry: LabAnswerBankEntry;
+  editing: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const explanation = entry.explanation;
+  return (
+    <article className="learning-card answer-bank-entry">
+      <div className="learning-card-meta">
+        <span>{entry.slug.toUpperCase()}</span>
+        <span className={entry.answerStatus === 'COMPLETE' ? 'answer-complete' : 'answer-missing'}>
+          {entry.answerStatus === 'COMPLETE' ? 'ANSWER COMPLETE' : 'NEEDS ANSWER'}
+        </span>
+      </div>
+      <h3>{entry.title}</h3>
+      <p><strong>Original challenge statement:</strong> {entry.statement}</p>
+      {entry.learningObjectives.length > 0 && <><h4>Concepts / objectives</h4><ul>{entry.learningObjectives.map((objective) => <li key={objective}>{objective}</li>)}</ul></>}
+      <h4>Expected educational answer</h4>
+      {explanation?.expectedAnswer
+        ? <p>{explanation.expectedAnswer}</p>
+        : <p className="answer-missing">This challenge still needs an educational answer.</p>}
+      {explanation?.solutionSteps.length ? <><h4>Step-by-step solution</h4><ol>{explanation.solutionSteps.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}</ol></> : null}
+      <div className="answer-bank-explanations">
+        {explanation && <>
+          <article><h4>Why the weakness occurs</h4><p>{explanation.rootCause}</p></article>
+          <article><h4>Security impact</h4><p>{explanation.impact}</p></article>
+          <article><h4>Remediation</h4><p>{explanation.remediationGuidance}</p></article>
+          <article><h4>Secure implementation</h4><p>{explanation.secureImplementation}</p></article>
+          <article><h4>Key takeaways</h4><ul>{explanation.keyTakeaways.map((item) => <li key={item}>{item}</li>)}</ul></article>
+        </>}
+      </div>
+      <h4>Quiz answer key</h4>
+      {entry.questions.length === 0 && <p className="learning-empty">No quiz questions are configured.</p>}
+      {entry.questions.map((question) => (
+        <article className="answer-bank-question" key={question.id}>
+          <div className="learning-card-meta"><span>Question {question.order}</span><span className={question.answerStatus === 'COMPLETE' ? 'answer-complete' : 'answer-missing'}>{question.answerStatus === 'COMPLETE' ? 'ANSWERED' : 'NEEDS ANSWER'}</span></div>
+          <p><strong>{question.prompt}</strong></p>
+          {question.correctAnswers.map((answer) => <p key={answer.text}><strong>Correct answer:</strong> {answer.text}{answer.explanation ? <> — {answer.explanation}</> : null}</p>)}
+          {question.correctAnswers.length === 0 && <p className="answer-missing">No correct answer is configured.</p>}
+        </article>
+      ))}
+      {!editing ? (
+        <button className="button button-secondary" type="button" onClick={onEdit}>Edit educational answer and explanation</button>
+      ) : (
+        <form className="admin-content-form answer-bank-editor" onSubmit={onSave}>
+          <h4>Edit educational content</h4>
+          <p>Quiz answer keys are read-only here and remain separate from student-facing explanations.</p>
+          <label>Learning objectives<textarea name="learningObjectives" defaultValue={entry.learningObjectives.join('\n')} required /></label>
+          <label>Expected educational answer<textarea name="expectedAnswer" defaultValue={explanation?.expectedAnswer ?? ''} required /></label>
+          <label>Step-by-step solution<textarea name="solutionSteps" defaultValue={explanation?.solutionSteps.join('\n') ?? ''} required /></label>
+          <label>Key takeaways<textarea name="keyTakeaways" defaultValue={explanation?.keyTakeaways.join('\n') ?? ''} required /></label>
+          <label>Root cause<textarea name="rootCause" defaultValue={explanation?.rootCause ?? ''} required /></label>
+          <label>Technical explanation<textarea name="technicalExplanation" defaultValue={explanation?.technicalExplanation ?? ''} required /></label>
+          <label>Impact<textarea name="impact" defaultValue={explanation?.impact ?? ''} required /></label>
+          <label>Conditions<textarea name="conditions" defaultValue={explanation?.conditions ?? ''} required /></label>
+          <label>Secure implementation<textarea name="secureImplementation" defaultValue={explanation?.secureImplementation ?? ''} required /></label>
+          <label>Remediation guidance<textarea name="remediationGuidance" defaultValue={explanation?.remediationGuidance ?? ''} required /></label>
+          <label>Detection ideas<textarea name="detectionIdeas" defaultValue={explanation?.detectionIdeas ?? ''} required /></label>
+          <label>Hints (one per line: order | penalty points | hint text)
+            <textarea name="hints" defaultValue={entry.hints.map((hint) => `${hint.order} | ${hint.pointsPenalty} | ${hint.content}`).join('\n')} />
+          </label>
+          <div className="answer-bank-actions">
+            <button className="button button-primary" type="submit">Save answer</button>
+            <button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button>
+          </div>
+        </form>
+      )}
+    </article>
+  );
+}
+
 type SecurityEventRecord = {
   id: string;
   eventType: string;
@@ -2309,6 +2545,9 @@ function WorkspacePage() {
     case '/admin':
       content = <AdminPage />;
       break;
+    case '/admin/lab-answer-bank':
+      content = <LabAnswerBankPage />;
+      break;
     case '/security-events':
       content = <SecurityEventsPage />;
       break;
@@ -2336,6 +2575,7 @@ export default function App() {
         <Route path="/leaderboard" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/analytics" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/admin/lab-answer-bank" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/security-events" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

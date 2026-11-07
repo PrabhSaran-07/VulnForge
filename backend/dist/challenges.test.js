@@ -477,6 +477,33 @@ test('category counts and challenge filters include only available published cha
     assert.equal(pageFilter.body.pagination.page, 2);
     assert.equal(pageFilter.body.pagination.limit, 1);
 });
+test('Coming Soon module slugs cannot be opened, started, or used for flag submissions', {
+    timeout: 20_000,
+}, async () => {
+    const { agent } = await createStudent();
+    const submissionAgents = await Promise.all([
+        createStudent(),
+        createStudent(),
+        createStudent(),
+        createStudent(),
+    ]);
+    const plannedSlugs = [
+        'inj-01-search-query-injection', 'inj-02-query-construction-flaw', 'inj-03-api-parameter-injection',
+        'session-01-session-handling', 'session-02-token-validation', 'session-03-session-expiry',
+        'upload-01-extension-validation', 'upload-02-mime-content-validation', 'upload-03-storage-path-handling',
+        'api-01-object-authorization', 'api-02-missing-authorization', 'api-03-excessive-data-exposure',
+        'api-04-weak-rate-limiting', 'api-05-input-validation',
+        'config-01-debug-error-disclosure', 'config-02-security-headers',
+        'config-03-cors-configuration', 'config-04-information-disclosure',
+    ];
+    for (const [index, slug] of plannedSlugs.entries()) {
+        await agent.get(`/api/challenges/${slug}`).expect(404);
+        await agent.post(`/api/challenges/${slug}/attempts`).send({}).expect(404);
+        await submissionAgents[index % submissionAgents.length].agent
+            .post(`/api/challenges/${slug}/attempts/${randomUUID()}/submissions`)
+            .send({ flag: 'VULNFORGE{unavailable}' }).expect(404);
+    }
+});
 test('challenge details return safe metadata and hide unpublished or unavailable challenges', async () => {
     const { agent } = await createStudent();
     const category = await createCategory();

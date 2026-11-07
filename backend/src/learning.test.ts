@@ -193,6 +193,7 @@ test('learning endpoints require authentication and keep explanations and answer
   assert.equal(JSON.stringify(publicHints.body).includes('Hint content'), false);
 
   await markSolved(user.id, challenge.id);
+  await agent.get('/api/admin/lab-answer-bank').expect(403);
   const quizResponse = await agent.get(`/api/challenges/${challenge.slug}/quiz`).expect(200);
   assert.deepEqual(
     quizResponse.body.questions.map((question: { id: string }) => question.id),

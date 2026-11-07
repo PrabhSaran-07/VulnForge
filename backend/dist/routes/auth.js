@@ -4,6 +4,7 @@ import prisma from '../lib/prisma.js';
 import { env } from '../config/env.js';
 import { hashPassword, isStrongPassword, isValidEmail, loginSchema, normalizeEmail, normalizeUsername, safeUser, userSelect, verifyPassword, registerSchema, } from '../lib/auth.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { recordSecurityEvent } from '../lib/security-events.js';
 const router = Router();
 function summarizeError(error, depth = 0) {
     if (!(error instanceof Error)) {
@@ -40,6 +41,18 @@ const registerLimiter = rateLimit({
         error: 'Too many requests',
         message: 'Please wait before creating another account.',
     },
+    handler: (req, res) => {
+        void recordSecurityEvent({
+            eventType: 'rate_limit_exceeded',
+            severity: 'MEDIUM',
+            requestId: String(res.locals.requestId ?? 'unknown'),
+            metadata: { route: '/auth/register', method: req.method },
+        });
+        res.status(429).json({
+            error: 'Too many requests',
+            message: 'Please wait before creating another account.',
+        });
+    },
 });
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -49,6 +62,18 @@ const loginLimiter = rateLimit({
     message: {
         error: 'Too many requests',
         message: 'Please wait before trying to sign in again.',
+    },
+    handler: (req, res) => {
+        void recordSecurityEvent({
+            eventType: 'rate_limit_exceeded',
+            severity: 'HIGH',
+            requestId: String(res.locals.requestId ?? 'unknown'),
+            metadata: { route: '/auth/login', method: req.method },
+        });
+        res.status(429).json({
+            error: 'Too many requests',
+            message: 'Please wait before trying to sign in again.',
+        });
     },
 });
 function getDuplicateConflictMessage(error) {
@@ -181,7 +206,14 @@ router.post('/login', loginLimiter, async (req, res) => {
         });
     }
     try {
-        if (!user || !(await verifyPassword(password, user.passwordHash))) {
+        if (!user || user.isActive === false || !(await verifyPassword(password, user.passwordHash))) {
+            void recordSecurityEvent({
+                eventType: 'authentication_failure',
+                severity: 'MEDIUM',
+                requestId: String(res.locals.requestId ?? 'unknown'),
+                ...(user ? { actorUserId: user.id } : {}),
+                metadata: { reason: 'invalid_credentials_or_disabled_account' },
+            });
             return res.status(401).json({
                 error: 'Unauthorized',
                 message: 'Invalid credentials.',
@@ -206,6 +238,12 @@ router.post('/login', loginLimiter, async (req, res) => {
             });
         }
         req.session.userId = user.id;
+        void recordSecurityEvent({
+            eventType: 'authentication_success',
+            severity: 'INFO',
+            requestId: String(res.locals.requestId ?? 'unknown'),
+            actorUserId: user.id,
+        });
         req.session.save((saveError) => {
             if (saveError) {
                 logAuthFailure('login session persistence', saveError, password);

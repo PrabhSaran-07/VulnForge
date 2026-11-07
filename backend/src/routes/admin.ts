@@ -4,6 +4,10 @@ import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { recordSecurityEvent } from '../lib/security-events.js';
+import {
+  ACCESS_CONTROL_LAB_CHALLENGE_SLUGS,
+  AUTH_LAB_CHALLENGE_SLUGS,
+} from '../lib/auth-lab.js';
 
 const router = Router();
 const pageSchema = z.object({
@@ -56,6 +60,10 @@ const eventQuerySchema = z.object({
   severity: z.enum(['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
+}).strict();
+const labAnswerBankQuerySchema = z.object({
+  search: z.string().trim().max(100).optional(),
+  category: z.enum(['authentication-security', 'access-control']).optional(),
 }).strict();
 
 function countAll(value: unknown): number {
@@ -173,6 +181,122 @@ router.get('/challenges', async (req, res) => {
     return res.json({ challenges, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
   } catch {
     return res.status(500).json({ error: 'Internal server error', message: 'Unable to list challenges.' });
+  }
+});
+
+router.get('/lab-answer-bank', async (req, res) => {
+  const parsed = labAnswerBankQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide a valid search term and lab category.' });
+  }
+  const authSlugs = [...AUTH_LAB_CHALLENGE_SLUGS];
+  const accessSlugs = [...ACCESS_CONTROL_LAB_CHALLENGE_SLUGS];
+  const search = parsed.data.search;
+  const categorySlug = parsed.data.category;
+  const where: Prisma.ChallengeWhereInput = {
+    status: 'PUBLISHED',
+    slug: {
+      in: categorySlug === 'authentication-security'
+        ? authSlugs
+        : categorySlug === 'access-control'
+          ? accessSlugs
+          : [...authSlugs, ...accessSlugs],
+    },
+    ...(categorySlug ? { category: { slug: categorySlug } } : {}),
+    ...(search
+      ? {
+          OR: [
+            { slug: { contains: search, mode: 'insensitive' } },
+            { title: { contains: search, mode: 'insensitive' } },
+            { quizQuestions: { some: { prompt: { contains: search, mode: 'insensitive' } } } },
+          ],
+        }
+      : {}),
+  };
+  try {
+    const challenges = await prisma.challenge.findMany({
+      where,
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        description: true,
+        learningObjectives: true,
+        category: { select: { slug: true, name: true } },
+        explanation: {
+          select: {
+            expectedAnswer: true,
+            solutionSteps: true,
+            keyTakeaways: true,
+            rootCause: true,
+            technicalExplanation: true,
+            impact: true,
+            conditions: true,
+            secureImplementation: true,
+            remediationGuidance: true,
+            detectionIdeas: true,
+          },
+        },
+        quizQuestions: {
+          select: {
+            id: true,
+            order: true,
+            prompt: true,
+            options: {
+              where: { isCorrect: true },
+              select: { text: true, explanation: true },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
+        hints: {
+          select: { order: true, content: true, pointsPenalty: true },
+          orderBy: { order: 'asc' },
+        },
+      },
+      orderBy: [{ category: { name: 'asc' } }, { slug: 'asc' }],
+    });
+
+    return res.json({
+      challenges: challenges.map((challenge) => {
+        const explanation = challenge.explanation;
+        const answerComplete = Boolean(explanation?.expectedAnswer.trim())
+          && Boolean(explanation?.solutionSteps.length)
+          && Boolean(explanation?.keyTakeaways.length)
+          && Boolean(explanation?.rootCause.trim())
+          && Boolean(explanation?.technicalExplanation.trim())
+          && Boolean(explanation?.impact.trim())
+          && Boolean(explanation?.conditions.trim())
+          && Boolean(explanation?.secureImplementation.trim())
+          && Boolean(explanation?.remediationGuidance.trim())
+          && Boolean(explanation?.detectionIdeas.trim());
+        return {
+          id: challenge.id,
+          slug: challenge.slug,
+          title: challenge.title,
+          statement: challenge.description,
+          category: challenge.category,
+          learningObjectives: challenge.learningObjectives,
+          hints: challenge.hints,
+          answerStatus: answerComplete ? 'COMPLETE' : 'NEEDS_ANSWER',
+          explanation,
+          questions: challenge.quizQuestions.map((question) => ({
+            ...question,
+            answerStatus: question.options.length === 1
+              && Boolean(question.options[0].explanation?.trim())
+              ? 'COMPLETE'
+              : 'NEEDS_ANSWER',
+            correctAnswers: question.options,
+          })),
+        };
+      }),
+      futureModules: {
+        status: 'COMING_SOON',
+        modules: [8, 9, 10, 11, 12],
+      },
+    });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to load the lab answer bank.' });
   }
 });
 

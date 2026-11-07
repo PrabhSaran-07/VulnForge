@@ -10,7 +10,7 @@
 | Modules 6–7 | Implemented as local simulations | Three synthetic AUTH challenges and three synthetic access-control challenges; the simulators do not target real services or change platform accounts. |
 | Modules 8–12 | Coming Soon | Static frontend placeholders only; no challenge records, flags, attempts, or lab execution. |
 | Module 13 | Foundation implemented | Structured security events and basic aggregate detection; not a full monitoring or compliance pipeline. |
-| Module 14 | Implemented for existing content | Role-protected admin workspace, user controls, publication controls, and educational-content editing; no general challenge or category authoring. |
+| Module 14 | Implemented for existing content | Role-protected admin workspace, user controls, publication controls, Lab Answer Bank, administrator-only quiz keys, and educational-content editing; no general challenge or category authoring. |
 | Module 15 | Foundation implemented | Solve-derived leaderboard and ranking; operational deployment is not verified. |
 | Module 16 | Disabled foundation only | Runtime policy and lifecycle contract; no executor, sandbox, or isolation verification. |
 | Module 17 | Foundation implemented | Learner and administrator analytics derived from stored activity. |

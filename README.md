@@ -377,6 +377,7 @@ All `/api/admin/*` routes use `requireAuth` and `requireRole(['ADMIN'])`; fronte
 | `PATCH /api/admin/challenges/:id` | Validated title/description/difficulty/points/objective edits; points cannot change after a solve exists. |
 | `GET /api/admin/challenges/:id/content` | Administrator-only educational answers, solution steps, explanation, objectives, and hints; secret/verifier fields are excluded. |
 | `PUT /api/admin/challenges/:id/content` | Validates and saves educational content. Hint changes are rejected after any learner has revealed a hint. Changes are audited. |
+| `GET /api/admin/lab-answer-bank` | Search/filter the six implemented AUTH/AC labs and read administrator-only challenge answers and correct quiz choices. |
 | `PATCH /api/admin/challenges/:id/status` | Publishes or archives a challenge. |
 | `GET /api/admin/submissions` | Recent flag outcome metadata; submitted flags are never stored or returned. |
 | `GET /api/admin/analytics` | Challenge performance, event trends, and aggregate student progress. |
@@ -480,7 +481,7 @@ Security-event metadata is restricted to approved operational fields and exclude
 - **Coming Soon placeholders:** Modules 8–12 appear in the frontend only. Their challenge content and lab execution are not implemented.
 - **Still unimplemented:** isolated challenge runtime execution, challenge-authoring API/UI, learning pathways, deployment, and a full audit/compliance pipeline.
 
-See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the concise remaining-work sequence and [docs/VULNFORGE_PROJECT_WALKTHROUGH.md](docs/VULNFORGE_PROJECT_WALKTHROUGH.md) for the faculty demonstration guide.
+See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the concise remaining-work sequence, [docs/VULNFORGE_PROJECT_WALKTHROUGH.md](docs/VULNFORGE_PROJECT_WALKTHROUGH.md) for the faculty demonstration guide, and [docs/VULNFORGE_COMPLETE_LAB_ANSWER_KEY.md](docs/VULNFORGE_COMPLETE_LAB_ANSWER_KEY.md) for the six implemented lab answers and administrator quiz key.
 
 Folders reserved for future work are not evidence that those features are implemented.
 

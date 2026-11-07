@@ -83,7 +83,13 @@ async function seedAuthLab() {
     const seeded = await prisma.$transaction(async (transaction) => {
       const existingChallenges = await transaction.challenge.findMany({
         where: { slug: { in: [...AUTH_LAB_CHALLENGE_SLUGS] } },
-        select: { id: true, slug: true, explanation: { select: { expectedAnswer: true } } },
+        select: {
+          id: true,
+          slug: true,
+          explanation: {
+            select: { expectedAnswer: true, solutionSteps: true, keyTakeaways: true },
+          },
+        },
       });
       if (existingChallenges.length === AUTH_LAB_CHALLENGE_SLUGS.length) {
         let updatedCount = 0;
@@ -97,10 +103,18 @@ async function seedAuthLab() {
               data: { challengeId: existing.id, ...content.explanation },
             });
             updatedCount += 1;
-          } else if (existing.explanation.expectedAnswer.length === 0) {
+          } else {
+            const missingContent = {
+              ...(existing.explanation.expectedAnswer.trim() ? {} : { expectedAnswer: content.explanation.expectedAnswer }),
+              ...(existing.explanation.solutionSteps.length ? {} : { solutionSteps: content.explanation.solutionSteps }),
+              ...(existing.explanation.keyTakeaways.length ? {} : { keyTakeaways: content.explanation.keyTakeaways }),
+            };
+            if (Object.keys(missingContent).length === 0) {
+              continue;
+            }
             await transaction.challengeExplanation.update({
               where: { challengeId: existing.id },
-              data: content.explanation,
+              data: missingContent,
             });
             updatedCount += 1;
           }

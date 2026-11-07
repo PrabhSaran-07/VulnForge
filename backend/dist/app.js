@@ -7,8 +7,20 @@ import connectPgSimple from 'connect-pg-simple';
 import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
 import challengesRouter from './routes/challenges.js';
+import authLabRouter from './routes/auth-lab.js';
+import accessControlLabRouter from './routes/access-control-lab.js';
+import adminRouter from './routes/admin.js';
+import platformRouter from './routes/platform.js';
 import { env } from './config/env.js';
+import { isAccessControlLabEnabled, isAuthLabEnabled } from './lib/auth-lab.js';
+import { randomUUID } from 'node:crypto';
 const app = express();
+app.use((_req, res, next) => {
+    const requestId = randomUUID();
+    res.locals.requestId = requestId;
+    res.setHeader('X-Request-Id', requestId);
+    next();
+});
 const sessionCookie = {
     httpOnly: true,
     sameSite: 'lax',
@@ -62,6 +74,14 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/api', healthRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api', platformRouter);
+if (isAuthLabEnabled(env.NODE_ENV, env.VULNFORGE_ENABLE_LOCAL_AUTH_LAB)) {
+    app.use('/api/auth-lab', authLabRouter);
+}
+if (isAccessControlLabEnabled(env.NODE_ENV, env.VULNFORGE_ENABLE_LOCAL_ACCESS_LAB)) {
+    app.use('/api/access-lab', accessControlLabRouter);
+}
 app.use('/api', challengesRouter);
 app.use((_req, res) => {
     res.status(404).json({
