@@ -4,7 +4,7 @@
 
 VulnForge is a cybersecurity learning platform where learners practice through CTF-style challenges, study security concepts, and track their progress in a controlled environment.
 
-[GitHub repository](https://github.com/PrabhSaran-07/VulnForge) · [Report an issue](https://github.com/PrabhSaran-07/VulnForge/issues)
+
 
 ## Key Features
 
