@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { env } from '../config/env.js';
-import { LOCAL_SECURITY_LAB_CHALLENGE_SLUGS, isAuthLabContentVisible } from '../lib/auth-lab.js';
+import { LOCAL_SECURITY_LAB_CHALLENGE_SLUGS } from '../lib/auth-lab.js';
 import { requireAuth } from '../middleware/auth.js';
 import { persistSubmission, verifySubmittedFlag } from '../lib/challenge-submissions.js';
 import { recordSecurityEvent } from '../lib/security-events.js';
@@ -12,8 +12,8 @@ import { recordSecurityEvent } from '../lib/security-events.js';
 const router = Router();
 const localSecurityLabChallengeSlugs = new Set<string>(LOCAL_SECURITY_LAB_CHALLENGE_SLUGS);
 
-function canBrowseLocalSecurityLabs(req: Request): boolean {
-  return isAuthLabContentVisible(env.NODE_ENV, req.socket.remoteAddress);
+function canBrowseLocalSecurityLabs(_req: Request): boolean {
+  return true;
 }
 
 router.param('slug', (req, res, next, slug) => {
