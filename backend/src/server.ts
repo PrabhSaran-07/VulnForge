@@ -4,6 +4,7 @@ import prisma from './lib/prisma.js';
 import { env } from './config/env.js';
 import { purgeExpiredSecurityEvents, recordSecurityEvent } from './lib/security-events.js';
 import { isAccessControlLabEnabled, isAuthLabEnabled } from './lib/auth-lab.js';
+import { bootstrapProductionData } from './lib/bootstrap.js';
 
 const port = env.PORT;
 
@@ -11,6 +12,7 @@ async function startServer() {
   try {
     await prisma.$connect();
     console.log('Database connection successful.');
+    await bootstrapProductionData();
   } catch {
     console.error('Database connection failed; the backend was not started.');
     process.exitCode = 1;

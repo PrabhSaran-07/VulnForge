@@ -1,4 +1,4 @@
-﻿import {
+import {
   createContext,
   type FormEvent,
   type ReactNode,
@@ -12,6 +12,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, use
 import { ApiError, apiRequest } from './api';
 import AuthLabSimulator from './components/AuthLabSimulator';
 import AccessControlLabSimulator from './components/AccessControlLabSimulator';
+import DocumentationPage from './components/DocumentationPage';
 import { getPlannedChallengeBySlug, getPlannedModuleBySlug, plannedModules } from './module-placeholders';
 
 const authLabChallengeSlugs = new Set([
@@ -832,6 +833,7 @@ const workspaceLinks = [
   { path: '/progress', label: 'My Progress', short: 'PR' },
   { path: '/leaderboard', label: 'Leaderboard', short: 'LB' },
   { path: '/analytics', label: 'Analytics', short: 'AN' },
+  { path: '/docs', label: 'Documentation', short: 'DC' },
   { path: '/profile', label: 'Profile', short: 'AC' },
 ];
 
@@ -887,6 +889,7 @@ function WorkspaceLayout({ children }: { children: ReactNode }) {
               {[
                 { path: '/admin', label: 'Admin workspace', short: 'AD' },
                 { path: '/admin/lab-answer-bank', label: 'Lab Answer Bank', short: 'AB' },
+                { path: '/docs', label: 'Platform Docs', short: 'DC' },
                 { path: '/security-events', label: 'Blue-Team events', short: 'EV' },
               ].map((item) => (
                 <Link
@@ -2218,6 +2221,19 @@ function AdminPage() {
         <article className="learning-card"><span>SUBMISSIONS</span><strong>{overview.submissions}</strong></article>
         <article className="learning-card"><span>SECURITY EVENTS · 24H</span><strong>{overview.securityEvents24Hours}</strong></article>
       </div>}
+      <div className="admin-docs-card">
+        <div className="admin-docs-card-header">
+          <div>
+            <span className="workspace-eyebrow">ADMINISTRATIVE DOCUMENTATION & CONTENT</span>
+            <h3>Platform Documentation & Lab Answer Bank</h3>
+            <p>Access authoritative challenge solutions, educational explanations, faculty demonstration walkthroughs, and architecture specs.</p>
+          </div>
+          <div className="admin-docs-card-actions">
+            <Link className="button button-primary" to="/admin/lab-answer-bank">Open Lab Answer Bank</Link>
+            <Link className="button button-secondary" to="/docs">View Documentation</Link>
+          </div>
+        </div>
+      </div>
       <section className="learning-card"><h2>User accounts</h2>
         <form className="admin-search" onSubmit={(event) => { event.preventDefault(); setUserPage(1); void loadAdminData(userSearch, 1); }}>
           <label>Search username<input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} maxLength={80} /></label>
@@ -2623,6 +2639,9 @@ function WorkspacePage() {
     case '/admin/lab-answer-bank':
       content = <LabAnswerBankPage />;
       break;
+    case '/docs':
+      content = <DocumentationPage />;
+      break;
     case '/security-events':
       content = <SecurityEventsPage />;
       break;
@@ -2651,6 +2670,7 @@ export default function App() {
         <Route path="/analytics" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/admin/lab-answer-bank" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
+        <Route path="/docs" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/security-events" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
