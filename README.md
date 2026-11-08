@@ -2,137 +2,108 @@
 
 **Build. Break. Defend.**
 
-VulnForge is a cybersecurity learning platform where learners practice through CTF-style challenges, study security concepts, and track their progress in a controlled environment.
+VulnForge is an interactive cybersecurity learning platform where learners practice through CTF-style challenges, study defensive and offensive concepts, and track their progress in a controlled environment.
 
+🌐 **Live Application:** [vulnforge-frontend.vercel.app](https://vulnforge-frontend.vercel.app/)
 
+---
 
-## Key Features
+## 🚀 Key Features
 
-- User registration, session-based authentication, and role-based access.
-- CTF challenge attempts, server-side flag verification, and scoring.
-- Learning modules with hints, quizzes, and solve-gated explanations.
-- Authentication and Access Control Security Labs with synthetic scenarios.
-- Leaderboard and learner progress tracking.
-- Admin workspace and administrator-only Lab Answer Bank.
-- Blue-Team security events and analytics.
-- Upcoming security labs clearly marked as Coming Soon.
+- **Authentication & RBAC:** Secure user registration, session-based authentication, and role-based access control (Learner and Administrator).
+- **CTF Challenges & Flag Submissions:** Server-side HMAC flag verification, automated scoring, and attempt tracking.
+- **Security Labs:** Hands-on labs covering Authentication Security and Access Control (IDOR, Broken Object-Level Authorization, Privilege Escalation).
+- **Learning & Defense:** Hint penalty system, interactive quizzes with instant feedback, and solve-gated educational explanations.
+- **Admin Workspace & Answer Bank:** Challenge management, platform analytics, real-time security events monitoring, and a comprehensive Lab Answer Bank.
+- **Interactive Documentation:** In-app platform documentation and walkthroughs accessible to learners and instructors.
+- **Leaderboard & Progress Tracking:** Real-time learner rankings, solved challenges history, and category completion metrics.
 
-## Technology Stack
+---
 
-- **Frontend:** React, TypeScript, React Router, Vite, Tailwind CSS.
-- **Backend:** Node.js, Express, TypeScript.
-- **Database:** PostgreSQL with Prisma ORM.
-- **Development tools:** npm, Docker Compose, Prisma CLI, Node.js test runner, Supertest.
+## 🛠️ Technology Stack
 
-## Project Structure
+- **Frontend:** React 19, TypeScript, React Router 7, Vite, Tailwind CSS (Hosted on [Vercel](https://vulnforge-frontend.vercel.app/))
+- **Backend:** Node.js, Express, TypeScript (Hosted on [Render](https://vulnforge-api.onrender.com))
+- **Database:** PostgreSQL with Prisma ORM (Hosted on [Neon](https://neon.tech))
+- **Security:** Argon2id / bcrypt password hashing, session cookies, HMAC-SHA256 flag verification, rate limiting, and Helmet CSP.
+
+---
+
+## 📂 Project Structure
 
 ```text
-backend/    Express API, authentication, challenge and learning services
-frontend/   React application and user interface
-prisma/     Database schema and migrations
-docs/       Project walkthrough and implementation plan
+VulnForge/
+├── backend/          # Express REST API, auth middleware, and lab services
+├── frontend/         # React SPA, UI components, and state management
+├── prisma/           # Prisma schema, migrations, and seed scripts
+├── docs/             # Complete answer keys and project walkthroughs
+└── render.yaml       # Render web service blueprint configuration
 ```
 
-## Installation and Setup
+---
+
+## ⚡ Quick Start (Local Development)
 
 ### Prerequisites
 
-- Node.js 22 and npm.
-- Docker Desktop with Docker Compose, or a PostgreSQL database.
-- Git.
+- Node.js 20+ and npm
+- Docker Desktop (or a local PostgreSQL instance)
+- Git
 
-### Environment configuration
+### 1. Clone & Configure Environment
 
-From the repository root, create a local environment file from the provided template:
-
-```powershell
-Copy-Item .env.example .env
+```bash
+git clone https://github.com/PrabhSaran-07/VulnForge.git
+cd VulnForge
+cp .env.example .env
 ```
 
-Review `.env.example` and set the required local values in `.env`. Do not commit or share this file.
+Review `.env` and set your local environment variables.
 
-### Database setup and migrations
+### 2. Install Dependencies & Start Database
 
-Install dependencies and start the PostgreSQL service:
-
-```powershell
+```bash
 npm install
 npm --prefix backend install
 npm --prefix frontend install
+
+# Start local PostgreSQL container (optional if using external Postgres)
 docker compose up -d postgres
 ```
 
-Generate the Prisma client and apply the database migrations:
+### 3. Initialize Database & Run Migrations
 
-```powershell
+```bash
 npm run db:generate
 npm run db:migrate
-npm run db:status
 ```
 
-### Start the application
+### 4. Start Development Servers
 
-In separate terminals from the repository root, start the backend and frontend:
+Run the backend and frontend in separate terminals:
 
-```powershell
+```bash
+# Terminal 1 - Backend (port 4000)
 npm run dev:backend
-```
 
-```powershell
+# Terminal 2 - Frontend (port 5173)
 npm run dev:frontend
 ```
 
-Open the frontend at `http://localhost:5173`. The backend listens at `http://localhost:4000`.
+Access the application locally at `http://localhost:5173`.
 
-## Production Deployment
+---
 
-The recommended arrangement is a Vercel frontend, a single long-running Node.js backend service, and hosted PostgreSQL (for example, Neon). The backend currently uses in-memory `express-rate-limit` stores, so do not scale it horizontally or deploy it as a serverless function: independent instances would have independent rate-limit counters. A shared rate-limit store is needed before scaling. PostgreSQL-backed sessions remain durable across backend restarts.
+## 🌐 Production Architecture
 
-The Vercel project includes a same-origin `/api/*` edge rewrite configuration. This keeps browser requests and the `httpOnly`, `Secure`, `SameSite=Lax` session cookie on the frontend origin by proxying API requests to the deployed backend on Render (`https://vulnforge-api.onrender.com`). Do not replace it with a browser-visible backend URL or a `VITE_` secret.
+The production environment is deployed using a decoupled, zero-CORS-exposure architecture:
 
-### 1. Create the production database
+1. **Frontend (Vercel):** Serves the Vite React single-page application at [vulnforge-frontend.vercel.app](https://vulnforge-frontend.vercel.app/). Vercel edge rewrites transparently forward `/api/*` traffic to the backend, maintaining same-origin session cookies (`httpOnly`, `Secure`, `SameSite=Lax`).
+2. **Backend (Render):** Express API running on Node.js at `https://vulnforge-api.onrender.com`. On startup, it bootstraps challenge data, ensures category visibility, and synchronizes flag verifier hashes.
+3. **Database (Neon Serverless PostgreSQL):** Managed cloud PostgreSQL instance connecting via connection pooling.
 
-Create a PostgreSQL database on Neon (or another managed PostgreSQL provider). Use its **pooled** connection string for the backend runtime and its **direct** connection string for migrations. Set both as secrets in the backend service; the Prisma config uses `DIRECT_URL` for CLI operations and `DATABASE_URL` otherwise. Do not copy either URL into the frontend project.
+---
 
-The Render start command runs `npm run db:deploy` before starting the API. This uses `prisma migrate deploy`, applies only committed pending migrations, and does not reset or replace existing data or migrations. If a migration fails, the API will not start. Do not run `prisma migrate dev` against production.
+## ⚠️ Disclaimer
 
-### 2. Deploy the backend
-
-In Render, create a **Blueprint** from the GitHub repository and select the branch containing `render.yaml`; the blueprint defines a free web service and its build/start commands. The build explicitly installs development dependencies because the TypeScript compiler and type declarations are needed to build even when `NODE_ENV=production`. The free instance may spin down after inactivity, causing cold starts, and its in-memory request-limit counters reset whenever it sleeps or restarts. The rate limiter remains enabled, but the free plan is suitable for testing/demonstration rather than production-grade availability or durable rate limiting. Never enable the development-only authentication/access-control labs in production.
-
-Set these backend environment variables in Render:
-
-| Variable | Value |
-| --- | --- |
-| `NODE_ENV` | `production` |
-| `DATABASE_URL` | Neon pooled PostgreSQL URL |
-| `DIRECT_URL` | Neon direct PostgreSQL URL used for migrations |
-| `SESSION_SECRET` | A unique random value of at least 32 characters; Render can generate it |
-| `CORS_ORIGIN` | Exact deployed frontend origin, with no trailing slash or path |
-| `VULNFORGE_FLAG_HMAC_KEYS` | JSON map of key versions to base64-encoded random keys (at least 32 bytes each), matching the keys used to provision challenge verifiers |
-| `VULNFORGE_ENABLE_LOCAL_AUTH_LAB` | `false` |
-| `VULNFORGE_ENABLE_LOCAL_ACCESS_LAB` | `false` |
-
-Render supplies `PORT`. Do not set test passwords or local lab flag values in production.
-
-### 3. Deploy the frontend
-
-In Vercel, import the same GitHub repository as a separate project and set its **Root Directory** to `frontend`. Select the deployment branch (do not push directly to `main`). `frontend/vercel.json` configures `npm install`, `npm run build`, the `dist` output, client-side routing, and external edge rewrites to the Render backend origin.
-
-For the first deployment, deploy the frontend to obtain its production origin, ensure that exact origin matches Render's `CORS_ORIGIN`, and verify that `frontend/vercel.json` rewrites point to your Render API. The optional `VITE_API_URL` in `frontend/.env.example` is only a local-development override; production traffic uses the same-origin proxy rewrites.
-
-### 4. Production database/application setup
-
-After migrations are applied, register an initial account through the app and promote it to `ADMIN` through a carefully reviewed, one-off database operation using a trusted PostgreSQL console; the repository only provides a development test-admin seeder and must not use it to create a production administrator. Create or import production challenges and store each challenge's flag verifier using a key version present in `VULNFORGE_FLAG_HMAC_KEYS`. The local AUTH and Access Control lab seed scripts are intentionally development-only.
-
-Check `https://<frontend-origin>/api/health` after both services deploy. Then verify registration, login, `/api/auth/me`, protected challenge listing, a valid/invalid flag submission, and leaderboard scoring using a test account and a provisioned challenge. Verify Vercel function logs and backend logs without copying secrets into tickets or chat. There is no live deployment or managed database until the repository is connected to the hosting providers and the required account/database configuration is supplied.
-
-## Project Status
-
-- Implemented: authentication, challenge and flag-submission workflow, learning features, AUTH and Access Control labs, administrator content management, leaderboard, progress, security events, and analytics.
-- Modules 8–12 are Coming Soon; their challenges and answers are not implemented.
-- Runtime isolation and challenge execution are not implemented. The project is not production-ready.
-
-## Disclaimer
-
-VulnForge is intended for controlled cybersecurity education and authorized testing only. Use it only in environments you own or are explicitly authorized to test.
+VulnForge is designed exclusively for educational purposes and authorized cybersecurity skill development. Synthetic vulnerability scenarios and simulations run in controlled boundaries and must not be used on unauthorized systems.
