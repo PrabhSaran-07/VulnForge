@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: vulnforge-api
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install && npm --prefix backend install && npm run db:generate && npm run build:backend
+    startCommand: npm --prefix backend run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: VULNFORGE_FLAG_HMAC_KEYS
+        sync: false
+      - key: VULNFORGE_ENABLE_LOCAL_AUTH_LAB
+        value: "false"
+      - key: VULNFORGE_ENABLE_LOCAL_ACCESS_LAB
+        value: "false"

@@ -51,6 +51,10 @@ function readVerifierKeyring(value: string | undefined): VerifierKeyringResult {
   return { available: true, keys };
 }
 
+export function hasValidFlagVerifierKeyring(value = process.env.VULNFORGE_FLAG_HMAC_KEYS): boolean {
+  return readVerifierKeyring(value).available;
+}
+
 export function createFlagVerifierHash(flag: string, key: Buffer): string {
   return createHmac('sha256', key).update(flag, 'utf8').digest('hex');
 }

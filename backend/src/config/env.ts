@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { hasValidFlagVerifierKeyring } from '../lib/challenge-submissions.js';
 
 dotenv.config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) });
 
@@ -31,6 +32,26 @@ if (!parsed.success) {
 }
 
 const env = parsed.data;
+
+if (env.NODE_ENV === 'production') {
+  const missingProductionVariables = [
+    'DATABASE_URL',
+    'CORS_ORIGIN',
+  ].filter((name) => !process.env[name]);
+
+  if (missingProductionVariables.length > 0) {
+    console.error(
+      `Missing required production environment variables: ${missingProductionVariables.join(', ')}`,
+    );
+    throw new Error('Production environment configuration is incomplete.');
+  }
+  if (!hasValidFlagVerifierKeyring()) {
+    console.error(
+      'VULNFORGE_FLAG_HMAC_KEYS must be a JSON map of versions to base64-encoded keys of at least 32 bytes.',
+    );
+    throw new Error('Production flag verification configuration is invalid.');
+  }
+}
 
 if (/^(change_me|replace_with|your_.*|example)/i.test(env.SESSION_SECRET)) {
   throw new Error(

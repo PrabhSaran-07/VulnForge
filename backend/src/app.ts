@@ -16,6 +16,9 @@ import { isAccessControlLabEnabled, isAuthLabEnabled } from './lib/auth-lab.js';
 import { randomUUID } from 'node:crypto';
 
 const app = express();
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 app.use((_req, res, next) => {
   const requestId = randomUUID();
   res.locals.requestId = requestId;
