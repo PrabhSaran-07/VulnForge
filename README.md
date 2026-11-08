@@ -98,7 +98,7 @@ The Render start command runs `npm run db:deploy` before starting the API. This 
 
 ### 2. Deploy the backend
 
-In Render, create a **Blueprint** from the GitHub repository and select the branch containing `render.yaml`; the blueprint defines a free web service and its build/start commands. The free instance may spin down after inactivity, causing cold starts, and its in-memory request-limit counters reset whenever it sleeps or restarts. The rate limiter remains enabled, but the free plan is suitable for testing/demonstration rather than production-grade availability or durable rate limiting. Never enable the development-only authentication/access-control labs in production.
+In Render, create a **Blueprint** from the GitHub repository and select the branch containing `render.yaml`; the blueprint defines a free web service and its build/start commands. The build explicitly installs development dependencies because the TypeScript compiler and type declarations are needed to build even when `NODE_ENV=production`. The free instance may spin down after inactivity, causing cold starts, and its in-memory request-limit counters reset whenever it sleeps or restarts. The rate limiter remains enabled, but the free plan is suitable for testing/demonstration rather than production-grade availability or durable rate limiting. Never enable the development-only authentication/access-control labs in production.
 
 Set these backend environment variables in Render:
 
