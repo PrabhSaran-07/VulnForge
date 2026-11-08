@@ -88,7 +88,7 @@ Open the frontend at `http://localhost:5173`. The backend listens at `http://loc
 
 The recommended arrangement is a Vercel frontend, a single long-running Node.js backend service, and hosted PostgreSQL (for example, Neon). The backend currently uses in-memory `express-rate-limit` stores, so do not scale it horizontally or deploy it as a serverless function: independent instances would have independent rate-limit counters. A shared rate-limit store is needed before scaling. PostgreSQL-backed sessions remain durable across backend restarts.
 
-The Vercel project includes a same-origin `/api/*` proxy. This keeps browser requests and the `httpOnly`, `Secure`, `SameSite=Lax` session cookie on the frontend origin; the proxy forwards requests to the backend using the server-only `BACKEND_URL`. Do not replace it with a browser-visible backend URL or a `VITE_` secret.
+The Vercel project includes a same-origin `/api/*` edge rewrite configuration. This keeps browser requests and the `httpOnly`, `Secure`, `SameSite=Lax` session cookie on the frontend origin by proxying API requests to the deployed backend on Render (`https://vulnforge-api.onrender.com`). Do not replace it with a browser-visible backend URL or a `VITE_` secret.
 
 ### 1. Create the production database
 
@@ -117,9 +117,9 @@ Render supplies `PORT`. Do not set test passwords or local lab flag values in pr
 
 ### 3. Deploy the frontend
 
-In Vercel, import the same GitHub repository as a separate project and set its **Root Directory** to `frontend`. Select the deployment branch (do not push directly to `main`). `frontend/vercel.json` configures `npm install`, `npm run build`, the `dist` output, and client-side routing. Add the backend's HTTPS origin as the Vercel **server-side** environment variable `BACKEND_URL` (the origin shown on the Render service page, with no path). Do not prefix it with `VITE_`.
+In Vercel, import the same GitHub repository as a separate project and set its **Root Directory** to `frontend`. Select the deployment branch (do not push directly to `main`). `frontend/vercel.json` configures `npm install`, `npm run build`, the `dist` output, client-side routing, and external edge rewrites to the Render backend origin.
 
-For the first deployment, deploy the frontend to obtain its production origin, put that exact origin in Render's `CORS_ORIGIN`, and redeploy the backend. Then set `BACKEND_URL` in Vercel and redeploy the frontend. The optional `VITE_API_URL` in `frontend/.env.example` is only a local-development override; production traffic uses the same-origin proxy.
+For the first deployment, deploy the frontend to obtain its production origin, ensure that exact origin matches Render's `CORS_ORIGIN`, and verify that `frontend/vercel.json` rewrites point to your Render API. The optional `VITE_API_URL` in `frontend/.env.example` is only a local-development override; production traffic uses the same-origin proxy rewrites.
 
 ### 4. Production database/application setup
 

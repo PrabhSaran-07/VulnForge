@@ -6,6 +6,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api",
+      "destination": "https://vulnforge-api.onrender.com/api"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://vulnforge-api.onrender.com/api/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
