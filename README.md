@@ -94,11 +94,11 @@ The Vercel project includes a same-origin `/api/*` proxy. This keeps browser req
 
 Create a PostgreSQL database on Neon (or another managed PostgreSQL provider). Use its **pooled** connection string for the backend runtime and its **direct** connection string for migrations. Set both as secrets in the backend service; the Prisma config uses `DIRECT_URL` for CLI operations and `DATABASE_URL` otherwise. Do not copy either URL into the frontend project.
 
-Apply the committed migrations with `npm run db:deploy` from the repository root, using the production `DIRECT_URL` in the trusted shell environment. This runs `prisma migrate deploy` and does not create, reset, or replace existing migrations. Do not run `prisma migrate dev` against production.
+The Render start command runs `npm run db:deploy` before starting the API. This uses `prisma migrate deploy`, applies only committed pending migrations, and does not reset or replace existing data or migrations. If a migration fails, the API will not start. Do not run `prisma migrate dev` against production.
 
 ### 2. Deploy the backend
 
-In Render, create a **Blueprint** from the GitHub repository and select the branch containing `render.yaml`; the blueprint defines the production build and start commands. Keep one backend instance so the existing in-memory request limits remain consistent; a restart resets those counters. Never enable the development-only authentication/access-control labs in production.
+In Render, create a **Blueprint** from the GitHub repository and select the branch containing `render.yaml`; the blueprint defines a free web service and its build/start commands. The free instance may spin down after inactivity, causing cold starts, and its in-memory request-limit counters reset whenever it sleeps or restarts. The rate limiter remains enabled, but the free plan is suitable for testing/demonstration rather than production-grade availability or durable rate limiting. Never enable the development-only authentication/access-control labs in production.
 
 Set these backend environment variables in Render:
 
