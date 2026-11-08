@@ -40,15 +40,29 @@ if (!databaseUrl) {
         throw new Error('A different account already uses the test administrator username or email; no changes were made.');
       }
 
+      let updated = false;
       if (existing.role !== 'ADMIN') {
-        throw new Error('The test administrator account exists without the ADMIN role; no changes were made.');
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: { role: 'ADMIN' },
+        });
+        console.info('Promoted test administrator account to the ADMIN role.');
+        updated = true;
       }
 
       if (!(await verifyPassword(password, existing.passwordHash))) {
-        throw new Error('The test administrator account exists with a different password; no changes were made.');
+        const passwordHash = await hashPassword(password);
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: { passwordHash },
+        });
+        console.info('Updated test administrator password to match configuration.');
+        updated = true;
       }
 
-      console.info('Test administrator already exists with the configured password and ADMIN role; left unchanged.');
+      if (!updated) {
+        console.info('Test administrator already exists with the configured password and ADMIN role; left unchanged.');
+      }
     } else {
       const passwordHash = await hashPassword(password);
       await prisma.user.create({
