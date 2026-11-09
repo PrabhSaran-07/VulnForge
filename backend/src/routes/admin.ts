@@ -218,6 +218,41 @@ router.patch('/users/:id/status', async (req, res) => {
   }
 });
 
+router.patch('/users/:id/role', async (req, res) => {
+  const roleSchema = z.object({
+    role: z.enum(['STUDENT', 'ADMIN']),
+  }).strict();
+  const parsed = roleSchema.safeParse(req.body);
+  if (!parsed.success || !z.string().uuid().safeParse(req.params.id).success) {
+    return res.status(400).json({ error: 'Invalid request', message: 'Provide a valid user ID and role.' });
+  }
+  try {
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, username: true, role: true },
+    });
+    if (!target) {
+      return res.status(404).json({ error: 'Not found', message: 'User does not exist.' });
+    }
+    const user = await prisma.user.update({
+      where: { id: target.id },
+      data: { role: parsed.data.role },
+      select: { id: true, username: true, role: true, isActive: true },
+    });
+    await recordSecurityEvent({
+      eventType: 'admin_user_role_changed',
+      severity: 'HIGH',
+      requestId: String(res.locals.requestId ?? 'unknown'),
+      actorUserId: req.user!.id,
+      targetUserId: target.id,
+      metadata: { role: user.role },
+    });
+    return res.json({ user });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error', message: 'Unable to update the account role.' });
+  }
+});
+
 router.get('/challenges', async (req, res) => {
   const parsed = pageSchema.safeParse(req.query);
   if (!parsed.success) {

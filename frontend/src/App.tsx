@@ -2087,6 +2087,19 @@ function AdminPage() {
       setError(requestError instanceof Error ? requestError.message : 'Unable to update account.');
     }
   };
+  const setUserRole = async (target: AdminUser, newRole: 'STUDENT' | 'ADMIN') => {
+    setNotice('');
+    try {
+      await apiRequest(`/api/admin/users/${target.id}/role`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      setNotice(`Updated ${target.username} role to ${newRole}.`);
+      await loadAdminData();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update user role.');
+    }
+  };
   const setChallengeStatus = async (challenge: AdminChallenge) => {
     const status = challenge.status === 'PUBLISHED' ? 'ARCHIVED' : 'PUBLISHED';
     setNotice('');
@@ -2239,8 +2252,23 @@ function AdminPage() {
           <label>Search username<input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} maxLength={80} /></label>
           <button className="button button-secondary" type="submit">Search</button>
         </form>
-        {users.map((target) => <p className="progress-row" key={target.id}><span>{target.username} · {target.role} · {target.isActive ? 'Active' : 'Disabled'}</span>
-          {target.role === 'STUDENT' && <button className="button button-secondary" type="button" onClick={() => void setUserActive(target)}>{target.isActive ? 'Disable' : 'Enable'}</button>}</p>)}
+        {users.map((target) => (
+          <div className="progress-row" key={target.id}>
+            <span>{target.username} · {target.role} · {target.isActive ? 'Active' : 'Disabled'}</span>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button className="button button-secondary" type="button" onClick={() => void setUserActive(target)}>
+                {target.isActive ? 'Disable' : 'Enable'}
+              </button>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => void setUserRole(target, target.role === 'ADMIN' ? 'STUDENT' : 'ADMIN')}
+              >
+                {target.role === 'ADMIN' ? 'Demote to Student' : 'Promote to Admin'}
+              </button>
+            </div>
+          </div>
+        ))}
         {userTotalPages > 1 && <div className="pagination-controls">
           <button className="button button-secondary" type="button" disabled={userPage <= 1} onClick={() => { const page = userPage - 1; setUserPage(page); void loadAdminData(userSearch, page); }}>Previous</button>
           <span>Page {userPage} of {userTotalPages}</span>

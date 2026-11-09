@@ -75,33 +75,87 @@ function getChallengeFlags(): Record<string, string> {
 
 export async function bootstrapProductionData(): Promise<void> {
   try {
-    // 1. Ensure testadmin exists and has role 'ADMIN'
-    const adminUsername = normalizeUsername('testadmin');
-    const adminEmail = normalizeEmail('admin@vulnforge.local');
-    const existingAdmin = await prisma.user.findFirst({
-      where: { OR: [{ username: adminUsername }, { email: adminEmail }] },
-    });
+    // 1. Ensure administrator accounts exist and have role 'ADMIN'
+    const defaultPassword = process.env.VULNFORGE_TEST_ADMIN_PASSWORD || 'a1Brwhjk2BqB0fTNyj4Wenh71QA3hElmpuLeiBGX2OBjM';
+    const passwordHash = await hashPassword(defaultPassword);
 
-    if (existingAdmin) {
-      if (existingAdmin.role !== 'ADMIN') {
-        await prisma.user.update({
-          where: { id: existingAdmin.id },
-          data: { role: 'ADMIN' },
-        });
-        console.info('[bootstrap] Promoted testadmin account to ADMIN role.');
-      }
-    } else {
-      const defaultPassword = process.env.VULNFORGE_TEST_ADMIN_PASSWORD || 'AdminWorkflowPass123';
-      const passwordHash = await hashPassword(defaultPassword);
-      await prisma.user.create({
-        data: {
-          username: adminUsername,
-          email: adminEmail,
-          passwordHash,
-          role: 'ADMIN',
+    const adminAccounts = [
+      { username: 'testadmin', email: 'admin@vulnforge.local' },
+      { username: 'admin', email: 'admin@vulnforge.dev' },
+    ];
+
+    for (const account of adminAccounts) {
+      const existing = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { username: account.username },
+            { email: account.email },
+          ],
         },
       });
-      console.info('[bootstrap] Created testadmin account with ADMIN role.');
+
+      if (existing) {
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            role: 'ADMIN',
+            passwordHash,
+            isActive: true,
+          },
+        });
+        console.info(`[bootstrap] Updated ${account.username} to ADMIN role with verified credentials.`);
+      } else {
+        await prisma.user.create({
+          data: {
+            username: account.username,
+            email: account.email,
+            passwordHash,
+            role: 'ADMIN',
+            isActive: true,
+          },
+        });
+        console.info(`[bootstrap] Created ${account.username} with ADMIN role.`);
+      }
+    }
+
+    // Also promote user accounts to ADMIN
+    const promoteUsernames = ['prabhleen_kaur', 'prabhleen kaur', 'test admin'];
+    const promoteEmails = ['prabhleenkaursaran2007@gmail.com'];
+
+    for (const name of promoteUsernames) {
+      const users = await prisma.user.findMany({
+        where: {
+          OR: [
+            { username: normalizeUsername(name) },
+            { username: name },
+            { username: { contains: name, mode: 'insensitive' } },
+          ],
+        },
+      });
+      for (const user of users) {
+        if (user.role !== 'ADMIN') {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { role: 'ADMIN', isActive: true },
+          });
+          console.info(`[bootstrap] Promoted account ${user.username} to ADMIN role.`);
+        }
+      }
+    }
+
+    for (const email of promoteEmails) {
+      const users = await prisma.user.findMany({
+        where: { email: normalizeEmail(email) },
+      });
+      for (const user of users) {
+        if (user.role !== 'ADMIN') {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { role: 'ADMIN', isActive: true },
+          });
+          console.info(`[bootstrap] Promoted account with email ${user.email} to ADMIN role.`);
+        }
+      }
     }
 
     // 2. Ensure Categories exist
